@@ -22,7 +22,6 @@ wheels/
 *.egg
 
 # Virtual environments & Conda
-.env
 .venv
 venv/
 ENV/
@@ -30,7 +29,7 @@ env.bak/
 venv.bak/
 
 # Environment configuration
-.env
+!.env
 !.env.example
 
 # Large binary checkpoints & Weights (exceeding GitHub 100MB limit)
@@ -47,13 +46,15 @@ venv.bak/
 models/**/.cache/
 models/**/download/
 models/**/trees/
+!models/CROMA/optical_sar_head_best.pt
 
 # Data & Datasets
 data/raw/
 data/processed/
 data/benchmarks/
 uploads/
-artifacts/
+artifacts/backups/
+artifacts/logs/
 storage/
 cache/
 
