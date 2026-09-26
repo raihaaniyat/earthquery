@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-09-25T21:47:00Z",
+  "images": {
+    "db": {
+      "repository": "postgis/postgis",
+      "tag": "16-3.4",
+      "digest": "sha256:88ebfa62ff9cbdd0d3a778b4081c7e2b7eb1c299c27fe8a3297a7e3d1f114c0e",
+      "service": "db"
+    },
+    "redis": {
+      "repository": "redis",
+      "tag": "7.2.5-alpine",
+      "digest": "sha256:7216a6953f93a746563e46c7bc374a2cb5e72d24dd80d297ff01b6fa202166ae",
+      "service": "redis"
+    },
+    "objectstore": {
+      "repository": "chrislusf/seaweedfs",
+      "tag": "3.79",
+      "digest": "sha256:a63f898394e218cefb7a149c445a6c382f64fba282b8f87059ea1605333eec1c",
+      "service": "objectstore"
+    }
+  }
+}

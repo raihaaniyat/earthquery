@@ -1,0 +1,66 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: satquery-postgis
+    environment:
+      POSTGRES_DB: satquery
+      POSTGRES_USER: satquery_admin
+      POSTGRES_PASSWORD: satquery_admin_password
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - satquery_postgis_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2048M
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U satquery_admin -d satquery"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7.2.5-alpine
+    container_name: satquery-redis
+    command: redis-server --appendonly yes --requirepass satquery_redis_password
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - satquery_redis_data:/data
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "satquery_redis_password", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  objectstore:
+    image: chrislusf/seaweedfs:3.79
+    container_name: satquery-objectstore
+    command: "server -s3 -dir=/data -s3.port=8333 -s3.allowEmptyFolder=true"
+    ports:
+      - "127.0.0.1:8333:8333"
+      - "127.0.0.1:9333:9333"
+    volumes:
+      - satquery_seaweedfs_data:/data
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2048M
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8333/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  satquery_postgis_data:
+  satquery_redis_data:
+  satquery_seaweedfs_data:

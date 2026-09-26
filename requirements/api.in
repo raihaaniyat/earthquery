@@ -1,0 +1,17 @@
+fastapi>=0.115,<1
+uvicorn>=0.34,<1
+pydantic>=2,<3
+pydantic-settings>=2,<3
+python-multipart
+SQLAlchemy>=2,<3
+alembic>=1,<2
+GeoAlchemy2
+psycopg[binary,pool]>=3.2,<4
+redis>=5,<9
+rq>=2.2,<3
+boto3>=1,<2
+langgraph>=1,<2
+reportlab>=4,<6
+pystac>=1,<2
+psutil
+filelock
