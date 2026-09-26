@@ -1,0 +1,23 @@
+{
+  "protocol_version": "1.0",
+  "success": true,
+  "job_id": "c457170f-f2f7-402b-a75a-25da121a5ba9",
+  "step_key": "internvl_vqa",
+  "attempt_id": "1",
+  "output_assets": {},
+  "output_metadata": {
+    "answer": "This satellite scene appears to show a grid-like pattern with varying intensities of blue and red. The land cover classes seem to be a mix of urban and possibly industrial areas, indicated by the structured and organized layout. The grid pattern suggests a systematic arrangement, which is common in urban planning or industrial zones. The blue and red colors likely represent different land cover types, with blue possibly indicating water bodies or vegetated areas, and red indicating man-made structures or roads. The overall impression is of a densely populated or industrial area with a structured layout.",
+    "prompt": "Describe the observable environmental features and land cover classes in this satellite scene.",
+    "model": "InternVL3-2B",
+    "max_tokens": 512
+  },
+  "metrics": {
+    "duration_ms": 13599.188566207886,
+    "peak_vram_mb": 4073.62255859375,
+    "peak_ram_mb": null,
+    "device_name": "cuda",
+    "cudnn_enabled": false
+  },
+  "error_code": null,
+  "error_message": null
+}

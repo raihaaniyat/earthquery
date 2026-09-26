@@ -53,10 +53,6 @@ data/raw/
 data/processed/
 data/benchmarks/
 uploads/
-artifacts/backups/
-artifacts/logs/
-storage/
-cache/
 
 # Node / Frontend
 node_modules/
@@ -71,6 +67,4 @@ yarn-error.log*
 .idea/
 .DS_Store
 Thumbs.db
-.pids.json
-*.log
 

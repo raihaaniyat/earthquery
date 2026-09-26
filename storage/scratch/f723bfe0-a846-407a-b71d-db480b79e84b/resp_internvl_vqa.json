@@ -1,0 +1,23 @@
+{
+  "protocol_version": "1.0",
+  "success": true,
+  "job_id": "f723bfe0-a846-407a-b71d-db480b79e84b",
+  "step_key": "internvl_vqa",
+  "attempt_id": "1",
+  "output_assets": {},
+  "output_metadata": {
+    "answer": "The image shows a blue circle on a green background with a smaller gray square in the top right corner.",
+    "prompt": "What do you see?",
+    "model": "InternVL3-2B",
+    "max_tokens": 512
+  },
+  "metrics": {
+    "duration_ms": 3401.8893241882324,
+    "peak_vram_mb": 4073.62255859375,
+    "peak_ram_mb": null,
+    "device_name": "cuda",
+    "cudnn_enabled": false
+  },
+  "error_code": null,
+  "error_message": null
+}

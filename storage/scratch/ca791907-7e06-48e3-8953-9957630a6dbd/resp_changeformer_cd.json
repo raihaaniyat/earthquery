@@ -1,0 +1,13 @@
+{
+  "protocol_version": "1.0",
+  "success": false,
+  "job_id": "ca791907-7e06-48e3-8953-9957630a6dbd",
+  "step_key": "changeformer_cd",
+  "attempt_id": "1",
+  "error_code": "CHANGEFORMER_INFERENCE_ERROR",
+  "error_message": "cannot identify image file 'C:/Users/HP/earthquery/storage\\\\uploads\\\\25eab7b75086429f8e978f43a136bf7e_sample.tif'",
+  "metrics": {
+    "duration_ms": 942.7299499511719,
+    "cudnn_enabled": false
+  }
+}

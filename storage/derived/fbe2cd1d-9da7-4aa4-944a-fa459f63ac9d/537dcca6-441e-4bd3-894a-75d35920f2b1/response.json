@@ -1,0 +1,18 @@
+{
+  "protocol_version": "1.0",
+  "success": false,
+  "job_id": "ingest-537dcca6-441e-4bd3-894a-75d35920f2b1",
+  "step_key": "preprocess",
+  "attempt_id": "1",
+  "output_assets": {},
+  "output_metadata": {},
+  "metrics": {
+    "duration_ms": 41.121721267700195,
+    "peak_vram_mb": null,
+    "peak_ram_mb": null,
+    "device_name": null,
+    "cudnn_enabled": false
+  },
+  "error_code": "PREPROCESS_ERROR",
+  "error_message": "cannot identify image file 'C:\\\\Users\\\\HP\\\\earthquery\\\\storage\\\\satquery-inputs\\\\inputs\\\\fbe2cd1d-9da7-4aa4-944a-fa459f63ac9d\\\\537dcca6-441e-4bd3-894a-75d35920f2b1\\\\5a7b5add-f919-463d-9b46-e8f0888c6483\\\\test_sample.png'"
+}

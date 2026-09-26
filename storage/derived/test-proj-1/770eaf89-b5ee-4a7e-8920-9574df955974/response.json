@@ -1,0 +1,38 @@
+{
+  "protocol_version": "1.0",
+  "success": true,
+  "job_id": "ingest-770eaf89-b5ee-4a7e-8920-9574df955974",
+  "step_key": "preprocess",
+  "attempt_id": "1",
+  "output_assets": {
+    "preview": "C:\\Users\\HP\\earthquery\\storage\\derived\\test-proj-1\\770eaf89-b5ee-4a7e-8920-9574df955974\\sample_optical_preview.png"
+  },
+  "output_metadata": {
+    "file_name": "sample_optical.png",
+    "coordinate_space": "pixel",
+    "native_crs_epsg": null,
+    "native_crs_wkt": null,
+    "width": 256,
+    "height": 256,
+    "band_count": 3,
+    "dtype": "uint8",
+    "nodata_value": null,
+    "affine_transform": null,
+    "footprint_geojson": null,
+    "pixel_size_x": 1.0,
+    "pixel_size_y": 1.0,
+    "pixel_unit": "pixel",
+    "preview_path": "C:\\Users\\HP\\earthquery\\storage\\derived\\test-proj-1\\770eaf89-b5ee-4a7e-8920-9574df955974\\sample_optical_preview.png",
+    "cog_path": null,
+    "duration_ms": 7.91621208190918
+  },
+  "metrics": {
+    "duration_ms": 7.91621208190918,
+    "peak_vram_mb": null,
+    "peak_ram_mb": null,
+    "device_name": null,
+    "cudnn_enabled": false
+  },
+  "error_code": null,
+  "error_message": null
+}

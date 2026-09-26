@@ -1,0 +1,14 @@
+{
+  "protocol_version": "1.0",
+  "job_id": "a1a7262f-fbcb-4065-9009-66b362f1808b",
+  "step_key": "optical_sar_classification",
+  "attempt_id": "1",
+  "model_version_id": "optical_sar_head",
+  "task_type": "optical_sar_classification",
+  "asset_references": {
+    "sentinel_1": "data/samples/sample_optical.png",
+    "sentinel_2": "data/samples/sample_optical.png"
+  },
+  "parameters": {},
+  "output_dir": "C:\\Users\\HP\\earthquery\\storage\\scratch\\a1a7262f-fbcb-4065-9009-66b362f1808b"
+}

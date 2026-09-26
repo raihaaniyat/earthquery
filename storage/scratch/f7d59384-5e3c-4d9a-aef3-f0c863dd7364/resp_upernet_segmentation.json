@@ -1,0 +1,61 @@
+{
+  "protocol_version": "1.0",
+  "success": true,
+  "job_id": "f7d59384-5e3c-4d9a-aef3-f0c863dd7364",
+  "step_key": "upernet_segmentation",
+  "attempt_id": "1",
+  "output_assets": {
+    "segmentation_mask": "C:\\Users\\HP\\earthquery\\storage\\scratch\\f7d59384-5e3c-4d9a-aef3-f0c863dd7364\\segmentation_mask.png"
+  },
+  "output_metadata": {
+    "model": "UPerNet ConvNeXt-Tiny",
+    "label_map": "ADE20K Scene Parsing",
+    "detected_classes": [
+      {
+        "class_id": 0,
+        "name": "wall",
+        "percentage": 44.13
+      },
+      {
+        "class_id": 21,
+        "name": "water",
+        "percentage": 34.24
+      },
+      {
+        "class_id": 8,
+        "name": "windowpane",
+        "percentage": 17.87
+      },
+      {
+        "class_id": 43,
+        "name": "signboard",
+        "percentage": 2.97
+      },
+      {
+        "class_id": 1,
+        "name": "building",
+        "percentage": 0.72
+      },
+      {
+        "class_id": 2,
+        "name": "sky",
+        "percentage": 0.06
+      },
+      {
+        "class_id": 26,
+        "name": "sea",
+        "percentage": 0.01
+      }
+    ],
+    "note": "Pretrained ADE20K classes represent demo proxy. Satellite land cover requires domain-specific head."
+  },
+  "metrics": {
+    "duration_ms": 733.1128120422363,
+    "peak_vram_mb": 1611.1220703125,
+    "peak_ram_mb": null,
+    "device_name": "cuda",
+    "cudnn_enabled": false
+  },
+  "error_code": null,
+  "error_message": null
+}

@@ -1,0 +1,66 @@
+{
+  "protocol_version": "1.0",
+  "success": true,
+  "job_id": "ingest-1a865db8-b12c-476c-9fb5-19bc900b8be2",
+  "step_key": "preprocess",
+  "attempt_id": "1",
+  "output_assets": {
+    "preview": "C:\\Users\\HP\\earthquery\\storage\\derived\\test-proj-1\\1a865db8-b12c-476c-9fb5-19bc900b8be2\\sample_geotiff_preview.png"
+  },
+  "output_metadata": {
+    "file_name": "sample_geotiff.tif",
+    "coordinate_space": "geographic",
+    "native_crs_epsg": 4326,
+    "native_crs_wkt": "GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS 84\",6378137,298.257223563,AUTHORITY[\"EPSG\",\"7030\"]],AUTHORITY[\"EPSG\",\"6326\"]],PRIMEM[\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],AXIS[\"Latitude\",NORTH],AXIS[\"Longitude\",EAST],AUTHORITY[\"EPSG\",\"4326\"]]",
+    "width": 100,
+    "height": 100,
+    "band_count": 4,
+    "dtype": "uint8",
+    "nodata_value": 0.0,
+    "affine_transform": "[0.0001, 0.0, 77.58, 0.0, -0.0001, 12.98]",
+    "footprint_geojson": {
+      "type": "MultiPolygon",
+      "coordinates": [
+        [
+          [
+            [
+              77.58,
+              12.97
+            ],
+            [
+              77.59,
+              12.97
+            ],
+            [
+              77.59,
+              12.98
+            ],
+            [
+              77.58,
+              12.98
+            ],
+            [
+              77.58,
+              12.97
+            ]
+          ]
+        ]
+      ]
+    },
+    "pixel_size_x": 0.0001,
+    "pixel_size_y": 0.0001,
+    "pixel_unit": "degree",
+    "preview_path": "C:\\Users\\HP\\earthquery\\storage\\derived\\test-proj-1\\1a865db8-b12c-476c-9fb5-19bc900b8be2\\sample_geotiff_preview.png",
+    "cog_path": null,
+    "duration_ms": 19.597530364990234
+  },
+  "metrics": {
+    "duration_ms": 19.597530364990234,
+    "peak_vram_mb": null,
+    "peak_ram_mb": null,
+    "device_name": null,
+    "cudnn_enabled": false
+  },
+  "error_code": null,
+  "error_message": null
+}

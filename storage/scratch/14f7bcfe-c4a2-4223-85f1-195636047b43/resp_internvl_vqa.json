@@ -1,0 +1,23 @@
+{
+  "protocol_version": "1.0",
+  "success": true,
+  "job_id": "14f7bcfe-c4a2-4223-85f1-195636047b43",
+  "step_key": "internvl_vqa",
+  "attempt_id": "1",
+  "output_assets": {},
+  "output_metadata": {
+    "answer": "The image shows a green background with a large blue circle and a smaller gray square. This could represent a simple land cover scene, possibly indicating a natural environment with a dominant green area and a smaller feature.",
+    "prompt": "Describe the land cover in this scene.",
+    "model": "InternVL3-2B",
+    "max_tokens": 512
+  },
+  "metrics": {
+    "duration_ms": 3978.1203269958496,
+    "peak_vram_mb": 4073.62255859375,
+    "peak_ram_mb": null,
+    "device_name": "cuda",
+    "cudnn_enabled": false
+  },
+  "error_code": null,
+  "error_message": null
+}

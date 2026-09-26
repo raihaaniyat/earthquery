@@ -1,0 +1,61 @@
+{
+  "protocol_version": "1.0",
+  "success": true,
+  "job_id": "a37a847e-1041-4c38-94b9-b4f82dc3f0b2",
+  "step_key": "croma_features",
+  "attempt_id": "1",
+  "output_assets": {
+    "feature_SAR_encodings": "C:\\Users\\HP\\earthquery\\storage\\scratch\\a37a847e-1041-4c38-94b9-b4f82dc3f0b2\\croma_SAR_encodings.npy",
+    "feature_SAR_GAP": "C:\\Users\\HP\\earthquery\\storage\\scratch\\a37a847e-1041-4c38-94b9-b4f82dc3f0b2\\croma_SAR_GAP.npy",
+    "feature_optical_encodings": "C:\\Users\\HP\\earthquery\\storage\\scratch\\a37a847e-1041-4c38-94b9-b4f82dc3f0b2\\croma_optical_encodings.npy",
+    "feature_optical_GAP": "C:\\Users\\HP\\earthquery\\storage\\scratch\\a37a847e-1041-4c38-94b9-b4f82dc3f0b2\\croma_optical_GAP.npy",
+    "feature_joint_encodings": "C:\\Users\\HP\\earthquery\\storage\\scratch\\a37a847e-1041-4c38-94b9-b4f82dc3f0b2\\croma_joint_encodings.npy",
+    "feature_joint_GAP": "C:\\Users\\HP\\earthquery\\storage\\scratch\\a37a847e-1041-4c38-94b9-b4f82dc3f0b2\\croma_joint_GAP.npy"
+  },
+  "output_metadata": {
+    "model": "CROMA-Base",
+    "feature_shapes": {
+      "SAR_encodings": [
+        1,
+        225,
+        768
+      ],
+      "SAR_GAP": [
+        1,
+        768
+      ],
+      "optical_encodings": [
+        1,
+        225,
+        768
+      ],
+      "optical_GAP": [
+        1,
+        768
+      ],
+      "joint_encodings": [
+        1,
+        225,
+        768
+      ],
+      "joint_GAP": [
+        1,
+        768
+      ]
+    },
+    "modalities": [
+      "optical_sentinel2_12band",
+      "sar_sentinel1_2band"
+    ],
+    "note": "CROMA extracts joint representation features; does not generate imagery or textual answers."
+  },
+  "metrics": {
+    "duration_ms": 2442.065954208374,
+    "peak_vram_mb": 767.2080078125,
+    "peak_ram_mb": null,
+    "device_name": "cuda",
+    "cudnn_enabled": false
+  },
+  "error_code": null,
+  "error_message": null
+}

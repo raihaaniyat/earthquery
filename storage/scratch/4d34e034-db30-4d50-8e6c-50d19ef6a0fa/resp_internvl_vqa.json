@@ -1,0 +1,23 @@
+{
+  "protocol_version": "1.0",
+  "success": true,
+  "job_id": "4d34e034-db30-4d50-8e6c-50d19ef6a0fa",
+  "step_key": "internvl_vqa",
+  "attempt_id": "1",
+  "output_assets": {},
+  "output_metadata": {
+    "answer": "The image features a green background with a large blue circle and a smaller gray square.",
+    "prompt": "What geometric shapes and colors are present in this satellite scene?",
+    "model": "InternVL3-2B",
+    "max_tokens": 512
+  },
+  "metrics": {
+    "duration_ms": 3402.834415435791,
+    "peak_vram_mb": 4073.62255859375,
+    "peak_ram_mb": null,
+    "device_name": "cuda",
+    "cudnn_enabled": false
+  },
+  "error_code": null,
+  "error_message": null
+}

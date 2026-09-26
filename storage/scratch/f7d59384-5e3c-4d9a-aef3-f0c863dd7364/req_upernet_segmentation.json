@@ -1,0 +1,13 @@
+{
+  "protocol_version": "1.0",
+  "job_id": "f7d59384-5e3c-4d9a-aef3-f0c863dd7364",
+  "step_key": "upernet_segmentation",
+  "attempt_id": "1",
+  "model_version_id": "upernet",
+  "task_type": "land_cover_segmentation",
+  "asset_references": {
+    "image": "data/samples/sample_optical.png"
+  },
+  "parameters": {},
+  "output_dir": "C:\\Users\\HP\\earthquery\\storage\\scratch\\f7d59384-5e3c-4d9a-aef3-f0c863dd7364"
+}

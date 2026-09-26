@@ -1,0 +1,53 @@
+{
+  "protocol_version": "1.0",
+  "success": true,
+  "job_id": "d5f172c0-a954-4ecc-82c2-34e312d3b492",
+  "step_key": "geoground_detection",
+  "attempt_id": "1",
+  "output_assets": {
+    "grounding_overlay": "C:\\Users\\HP\\earthquery\\storage\\scratch\\d5f172c0-a954-4ecc-82c2-34e312d3b492\\grounding_overlay.png"
+  },
+  "output_metadata": {
+    "model": "OWLv2 GeoGround (google/owlv2-base-patch16-ensemble)",
+    "queries": [
+      "circles",
+      "squares"
+    ],
+    "total_detections": 2,
+    "detections": [
+      {
+        "label": "circles",
+        "score": 0.3752,
+        "box": [
+          63.4,
+          63.5,
+          194.9,
+          194.8
+        ]
+      },
+      {
+        "label": "squares",
+        "score": 0.2848,
+        "box": [
+          179.5,
+          19.9,
+          241.1,
+          61.8
+        ]
+      }
+    ],
+    "summary": "Visual grounding completed with OWLv2: detected 2 object regions matching queries [circles, squares]. Breakdown: 1 circles, 1 squares.",
+    "text": "Visual grounding completed with OWLv2: detected 2 object regions matching queries [circles, squares]. Breakdown: 1 circles, 1 squares.",
+    "vram_allocated_mb": 1862.86,
+    "note": "Open-vocabulary zero-shot visual grounding replacing GeoGround-7B. Operates within 6 GB VRAM limit (~590 MiB allocated)."
+  },
+  "metrics": {
+    "duration_ms": 4610.991954803467,
+    "peak_vram_mb": 1862.85693359375,
+    "peak_ram_mb": null,
+    "device_name": "cuda",
+    "cudnn_enabled": false
+  },
+  "error_code": null,
+  "error_message": null
+}

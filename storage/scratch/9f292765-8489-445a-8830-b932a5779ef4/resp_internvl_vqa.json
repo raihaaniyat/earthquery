@@ -1,0 +1,23 @@
+{
+  "protocol_version": "1.0",
+  "success": true,
+  "job_id": "9f292765-8489-445a-8830-b932a5779ef4",
+  "step_key": "internvl_vqa",
+  "attempt_id": "1",
+  "output_assets": {},
+  "output_metadata": {
+    "answer": "This image is an aerial view of a coastal area with a mix of urban and agricultural land. The coastline is visible on the left, with a distinct line separating the land from the ocean. The land features a network of roads and buildings, indicating a developed urban area. There are patches of green fields, likely agricultural land, interspersed throughout the urban landscape. The overall color palette is dominated by earthy tones, with the ocean appearing in a darker shade.",
+    "prompt": "describe this image for me",
+    "model": "InternVL3-2B",
+    "max_tokens": 512
+  },
+  "metrics": {
+    "duration_ms": 12366.344690322876,
+    "peak_vram_mb": 4073.62255859375,
+    "peak_ram_mb": null,
+    "device_name": "cuda",
+    "cudnn_enabled": false
+  },
+  "error_code": null,
+  "error_message": null
+}

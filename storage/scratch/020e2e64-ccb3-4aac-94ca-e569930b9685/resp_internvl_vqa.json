@@ -1,0 +1,23 @@
+{
+  "protocol_version": "1.0",
+  "success": true,
+  "job_id": "020e2e64-ccb3-4aac-94ca-e569930b9685",
+  "step_key": "internvl_vqa",
+  "attempt_id": "1",
+  "output_assets": {},
+  "output_metadata": {
+    "answer": "This satellite scene features a landscape dominated by blue hues, indicating water bodies or reflective surfaces. The darker blue areas likely represent larger bodies of water, such as lakes or rivers, while the lighter blue and white regions could be ice or snow. The land cover appears to be a mix of water and possibly some vegetated or barren areas, as suggested by the varying shades of blue and white. The overall texture and coloration suggest a cold or polar environment.",
+    "prompt": "Describe the observable environmental features and land cover classes in this satellite scene.",
+    "model": "InternVL3-2B",
+    "max_tokens": 512
+  },
+  "metrics": {
+    "duration_ms": 12973.925828933716,
+    "peak_vram_mb": 4073.62255859375,
+    "peak_ram_mb": null,
+    "device_name": "cuda",
+    "cudnn_enabled": false
+  },
+  "error_code": null,
+  "error_message": null
+}

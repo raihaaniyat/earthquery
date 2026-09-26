@@ -1,0 +1,36 @@
+{
+  "protocol_version": "1.0",
+  "success": true,
+  "job_id": "1149f65f-5ce0-4315-945a-f7bd21ea294c",
+  "step_key": "change_vqa_reasoning",
+  "attempt_id": "1",
+  "output_assets": {},
+  "output_metadata": {
+    "model": "Paired-Image Change VQA (Siamese VLM Cross-Attention)",
+    "task": "change_vqa",
+    "question": "What changed between these two acquisition dates?",
+    "answer": "Bitemporal change detection reveals water body contraction and shoreline retreat between T1 (pre-event) and T2 (post-event). The estimated affected area is moderate (10-30% area).",
+    "text": "Bitemporal change detection reveals water body contraction and shoreline retreat between T1 (pre-event) and T2 (post-event). The estimated affected area is moderate (10-30% area).",
+    "summary": "Bitemporal change detection reveals water body contraction and shoreline retreat between T1 (pre-event) and T2 (post-event). The estimated affected area is moderate (10-30% area).",
+    "change_detected": true,
+    "change_category": "water_shrinkage",
+    "change_magnitude": "moderate (10-30% area)",
+    "confidence": 0.9961,
+    "probabilities": {
+      "presence": 0.9961,
+      "category": 0.9917
+    },
+    "temporal_direction": "T1 (Pre-event) -> T2 (Post-event)",
+    "vram_allocated_mb": 364.36,
+    "note": "Trained on CDVQA benchmark for bitemporal satellite change reasoning."
+  },
+  "metrics": {
+    "duration_ms": 2196.02108001709,
+    "peak_vram_mb": 364.36474609375,
+    "peak_ram_mb": null,
+    "device_name": "cuda",
+    "cudnn_enabled": false
+  },
+  "error_code": null,
+  "error_message": null
+}

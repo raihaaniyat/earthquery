@@ -1,0 +1,14 @@
+{
+  "protocol_version": "1.0",
+  "job_id": "f0fc71c9-2ecf-4089-b1b9-3281422cdc49",
+  "step_key": "changeformer_cd",
+  "attempt_id": "1",
+  "model_version_id": "changeformer",
+  "task_type": "bitemporal_change",
+  "asset_references": {
+    "image_t1": "C:/Users/HP/earthquery/storage\\uploads\\3a1eb445b9464df08c1c355e60f97db2_t1.png",
+    "image_t2": "C:/Users/HP/earthquery/storage\\uploads\\730174427a154e0c952df5540ffcb7cd_t2.png"
+  },
+  "parameters": {},
+  "output_dir": "C:\\Users\\HP\\earthquery\\storage\\scratch\\f0fc71c9-2ecf-4089-b1b9-3281422cdc49"
+}

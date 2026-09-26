@@ -1,0 +1,13 @@
+{
+  "protocol_version": "1.0",
+  "job_id": "ingest-f0e020d4-2648-48d1-bf80-e0d23805eed1",
+  "step_key": "preprocess",
+  "attempt_id": "1",
+  "model_version_id": "none",
+  "task_type": "metadata_extraction",
+  "asset_references": {
+    "original": "C:\\Users\\HP\\earthquery\\storage\\satquery-inputs\\inputs\\e64343dc-4fb3-41c3-ac45-61635ae3beaf\\f0e020d4-2648-48d1-bf80-e0d23805eed1\\4875235c-8c1b-4146-aacb-fa7fee065fde\\sample.tif"
+  },
+  "parameters": {},
+  "output_dir": "C:\\Users\\HP\\earthquery\\storage\\derived\\e64343dc-4fb3-41c3-ac45-61635ae3beaf\\f0e020d4-2648-48d1-bf80-e0d23805eed1"
+}

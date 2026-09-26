@@ -1,0 +1,16 @@
+{
+  "protocol_version": "1.0",
+  "job_id": "8e455238-f264-4ddc-b599-67d391b20a70",
+  "step_key": "internvl_vqa",
+  "attempt_id": "1",
+  "model_version_id": "internvl3",
+  "task_type": "vqa",
+  "asset_references": {
+    "image": "C:/Users/HP/earthquery/storage\\uploads\\13170797626142aaa6a6f06d50559bd1_sample.png"
+  },
+  "parameters": {
+    "prompt": "Describe the visible land features, terrain, and structures in this scene.",
+    "max_tokens": 512
+  },
+  "output_dir": "C:\\Users\\HP\\earthquery\\storage\\scratch\\8e455238-f264-4ddc-b599-67d391b20a70"
+}

@@ -1,0 +1,13 @@
+{
+  "protocol_version": "1.0",
+  "job_id": "ingest-6c116b9a-ae9a-414b-bef0-dca71a327230",
+  "step_key": "preprocess",
+  "attempt_id": "1",
+  "model_version_id": "none",
+  "task_type": "metadata_extraction",
+  "asset_references": {
+    "original": "C:\\Users\\HP\\earthquery\\storage\\satquery-inputs\\inputs\\e64343dc-4fb3-41c3-ac45-61635ae3beaf\\6c116b9a-ae9a-414b-bef0-dca71a327230\\05d1c6bc-35eb-4240-b08e-e70caf0c6142\\Farmland_64.tif"
+  },
+  "parameters": {},
+  "output_dir": "C:\\Users\\HP\\earthquery\\storage\\derived\\e64343dc-4fb3-41c3-ac45-61635ae3beaf\\6c116b9a-ae9a-414b-bef0-dca71a327230"
+}

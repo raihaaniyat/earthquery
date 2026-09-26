@@ -1,0 +1,14 @@
+{
+  "protocol_version": "1.0",
+  "job_id": "a37a847e-1041-4c38-94b9-b4f82dc3f0b2",
+  "step_key": "croma_features",
+  "attempt_id": "1",
+  "model_version_id": "croma",
+  "task_type": "feature_extraction",
+  "asset_references": {
+    "sentinel_1": "data/samples/sample_optical.png",
+    "sentinel_2": "data/samples/sample_optical.png"
+  },
+  "parameters": {},
+  "output_dir": "C:\\Users\\HP\\earthquery\\storage\\scratch\\a37a847e-1041-4c38-94b9-b4f82dc3f0b2"
+}

@@ -1,0 +1,16 @@
+{
+  "protocol_version": "1.0",
+  "job_id": "c457170f-f2f7-402b-a75a-25da121a5ba9",
+  "step_key": "internvl_vqa",
+  "attempt_id": "1",
+  "model_version_id": "internvl3",
+  "task_type": "vqa",
+  "asset_references": {
+    "image": "C:\\Users\\HP\\earthquery\\storage\\satquery-derived\\derived\\e64343dc-4fb3-41c3-ac45-61635ae3beaf\\71d7b926-b79b-42a0-940d-4d9e3e3501cb\\preview.png"
+  },
+  "parameters": {
+    "prompt": "Describe the observable environmental features and land cover classes in this satellite scene.",
+    "max_tokens": 512
+  },
+  "output_dir": "C:\\Users\\HP\\earthquery\\storage\\scratch\\c457170f-f2f7-402b-a75a-25da121a5ba9"
+}

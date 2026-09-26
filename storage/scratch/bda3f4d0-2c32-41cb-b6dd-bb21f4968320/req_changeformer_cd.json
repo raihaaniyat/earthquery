@@ -1,0 +1,14 @@
+{
+  "protocol_version": "1.0",
+  "job_id": "bda3f4d0-2c32-41cb-b6dd-bb21f4968320",
+  "step_key": "changeformer_cd",
+  "attempt_id": "1",
+  "model_version_id": "changeformer",
+  "task_type": "bitemporal_change",
+  "asset_references": {
+    "image_t1": "data/samples/sample_optical.png",
+    "image_t2": "data/samples/sample_optical.png"
+  },
+  "parameters": {},
+  "output_dir": "C:\\Users\\HP\\earthquery\\storage\\scratch\\bda3f4d0-2c32-41cb-b6dd-bb21f4968320"
+}

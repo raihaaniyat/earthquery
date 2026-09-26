@@ -1,0 +1,16 @@
+{
+  "protocol_version": "1.0",
+  "job_id": "cc82e4df-55cf-4d58-b7cd-342286e0e84c",
+  "step_key": "geoground_detection",
+  "attempt_id": "1",
+  "model_version_id": "geoground",
+  "task_type": "visual_grounding",
+  "asset_references": {
+    "image": "C:/Users/HP/earthquery/storage\\uploads\\3d5c6f20ef4c4c58a5c5c885e153da8f_sample_optical.png"
+  },
+  "parameters": {
+    "prompt": "Find buildings and roads",
+    "threshold": 0.1
+  },
+  "output_dir": "C:\\Users\\HP\\earthquery\\storage\\scratch\\cc82e4df-55cf-4d58-b7cd-342286e0e84c"
+}

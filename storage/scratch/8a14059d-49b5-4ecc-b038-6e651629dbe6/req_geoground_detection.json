@@ -1,0 +1,16 @@
+{
+  "protocol_version": "1.0",
+  "job_id": "8a14059d-49b5-4ecc-b038-6e651629dbe6",
+  "step_key": "geoground_detection",
+  "attempt_id": "1",
+  "model_version_id": "geoground",
+  "task_type": "visual_grounding",
+  "asset_references": {
+    "image": "data/samples/sample_optical.png"
+  },
+  "parameters": {
+    "prompt": "Find buildings in this image.",
+    "threshold": 0.1
+  },
+  "output_dir": "C:\\Users\\HP\\earthquery\\storage\\scratch\\8a14059d-49b5-4ecc-b038-6e651629dbe6"
+}

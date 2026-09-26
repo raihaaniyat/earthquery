@@ -1,0 +1,30 @@
+{
+  "protocol_version": "1.0",
+  "success": true,
+  "job_id": "d4c8ad08-8480-46e5-b809-559ddd8d727c",
+  "step_key": "changeformer_cd",
+  "attempt_id": "1",
+  "output_assets": {
+    "change_mask": "C:\\Users\\HP\\earthquery\\storage\\scratch\\d4c8ad08-8480-46e5-b809-559ddd8d727c\\change_mask.png"
+  },
+  "output_metadata": {
+    "model": "ChangeFormerV6",
+    "checkpoint": "LEVIR-CD",
+    "total_pixels": 64,
+    "changed_pixels": 0,
+    "change_percentage": 0.0,
+    "resolution": [
+      256,
+      256
+    ],
+    "mask_classes": {
+      "0": "unchanged",
+      "1": "changed"
+    }
+  },
+  "metrics": {
+    "duration_ms": 1217.2753810882568,
+    "device_name": "cpu",
+    "cudnn_enabled": false
+  }
+}

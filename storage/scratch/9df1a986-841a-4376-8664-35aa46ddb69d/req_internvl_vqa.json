@@ -1,0 +1,16 @@
+{
+  "protocol_version": "1.0",
+  "job_id": "9df1a986-841a-4376-8664-35aa46ddb69d",
+  "step_key": "internvl_vqa",
+  "attempt_id": "1",
+  "model_version_id": "internvl3",
+  "task_type": "vqa",
+  "asset_references": {
+    "image": "data/samples/sample_optical.png"
+  },
+  "parameters": {
+    "prompt": "Identify any noticeable infrastructure features in this satellite scene.",
+    "max_tokens": 512
+  },
+  "output_dir": "C:\\Users\\HP\\earthquery\\storage\\scratch\\9df1a986-841a-4376-8664-35aa46ddb69d"
+}

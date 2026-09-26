@@ -1,0 +1,16 @@
+{
+  "protocol_version": "1.0",
+  "job_id": "14f7bcfe-c4a2-4223-85f1-195636047b43",
+  "step_key": "internvl_vqa",
+  "attempt_id": "1",
+  "model_version_id": "internvl3",
+  "task_type": "vqa",
+  "asset_references": {
+    "image": "C:/Users/HP/earthquery/storage\\uploads\\31d1e1b9551d4b0180f4fec1ce590e3a_sample_optical.png"
+  },
+  "parameters": {
+    "prompt": "Describe the land cover in this scene.",
+    "max_tokens": 512
+  },
+  "output_dir": "C:\\Users\\HP\\earthquery\\storage\\scratch\\14f7bcfe-c4a2-4223-85f1-195636047b43"
+}

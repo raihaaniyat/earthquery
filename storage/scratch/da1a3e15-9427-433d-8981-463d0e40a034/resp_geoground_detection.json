@@ -1,0 +1,32 @@
+{
+  "protocol_version": "1.0",
+  "success": true,
+  "job_id": "da1a3e15-9427-433d-8981-463d0e40a034",
+  "step_key": "geoground_detection",
+  "attempt_id": "1",
+  "output_assets": {
+    "grounding_overlay": "C:\\Users\\HP\\earthquery\\storage\\scratch\\da1a3e15-9427-433d-8981-463d0e40a034\\grounding_overlay.png"
+  },
+  "output_metadata": {
+    "model": "OWLv2 GeoGround (google/owlv2-base-patch16-ensemble)",
+    "queries": [
+      "and detect green fields",
+      "ground"
+    ],
+    "total_detections": 0,
+    "detections": [],
+    "summary": "Visual grounding completed with OWLv2: detected 0 object regions matching queries [and detect green fields, ground]. Breakdown: No objects detected at confidence threshold..",
+    "text": "Visual grounding completed with OWLv2: detected 0 object regions matching queries [and detect green fields, ground]. Breakdown: No objects detected at confidence threshold..",
+    "vram_allocated_mb": 1862.86,
+    "note": "Open-vocabulary zero-shot visual grounding replacing GeoGround-7B. Operates within 6 GB VRAM limit (~590 MiB allocated)."
+  },
+  "metrics": {
+    "duration_ms": 4525.439977645874,
+    "peak_vram_mb": 1862.85693359375,
+    "peak_ram_mb": null,
+    "device_name": "cuda",
+    "cudnn_enabled": false
+  },
+  "error_code": null,
+  "error_message": null
+}

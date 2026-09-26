@@ -1,0 +1,11 @@
+{
+  "protocol_version": "1.0",
+  "job_id": "job-sim-1",
+  "step_key": "step-sim-1",
+  "attempt_id": "1",
+  "model_version_id": "model-1",
+  "task_type": "vqa",
+  "asset_references": {},
+  "parameters": {},
+  "output_dir": "storage/test_sim"
+}
