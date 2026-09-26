@@ -1,0 +1,92 @@
+{
+  "model_id": "optical_sar_head",
+  "name": "Optical-SAR Downstream Classification Head",
+  "backbone": "CROMA-Base (Dual Vision Transformer ViT-B)",
+  "num_classes": 19,
+  "classes": [
+    "Urban fabric",
+    "Industrial or commercial units",
+    "Arable land",
+    "Permanent crops",
+    "Pastures",
+    "Complex cultivation patterns",
+    "Land principally occupied by agriculture",
+    "Green urban areas",
+    "Broad-leaved forest",
+    "Coniferous forest",
+    "Mixed forest",
+    "Natural grasslands",
+    "Moors and heathland",
+    "Sclerophyllous vegetation",
+    "Transitional woodland, shrub",
+    "Beaches, dunes, sands",
+    "Bare rock and sparsely vegetated",
+    "Inland wetlands",
+    "Water bodies"
+  ],
+  "best_macro_f1": 31.04,
+  "training_time_seconds": 90.04,
+  "checkpoint_path": "C:\\Users\\HP\\earthquery\\models\\CROMA\\optical_sar_head_best.pt",
+  "history": [
+    {
+      "epoch": 1,
+      "train_loss": 0.355,
+      "val_loss": 0.3318,
+      "macro_f1": 4.21
+    },
+    {
+      "epoch": 2,
+      "train_loss": 0.3001,
+      "val_loss": 0.2992,
+      "macro_f1": 11.7
+    },
+    {
+      "epoch": 3,
+      "train_loss": 0.2694,
+      "val_loss": 0.2743,
+      "macro_f1": 20.39
+    },
+    {
+      "epoch": 4,
+      "train_loss": 0.2526,
+      "val_loss": 0.2624,
+      "macro_f1": 23.05
+    },
+    {
+      "epoch": 5,
+      "train_loss": 0.2405,
+      "val_loss": 0.2496,
+      "macro_f1": 24.06
+    },
+    {
+      "epoch": 6,
+      "train_loss": 0.2272,
+      "val_loss": 0.2417,
+      "macro_f1": 22.52
+    },
+    {
+      "epoch": 7,
+      "train_loss": 0.2207,
+      "val_loss": 0.2393,
+      "macro_f1": 23.2
+    },
+    {
+      "epoch": 8,
+      "train_loss": 0.2161,
+      "val_loss": 0.2323,
+      "macro_f1": 31.04
+    },
+    {
+      "epoch": 9,
+      "train_loss": 0.2123,
+      "val_loss": 0.2353,
+      "macro_f1": 26.6
+    },
+    {
+      "epoch": 10,
+      "train_loss": 0.2099,
+      "val_loss": 0.2332,
+      "macro_f1": 26.81
+    }
+  ]
+}

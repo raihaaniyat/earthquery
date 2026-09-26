@@ -1,0 +1,112 @@
+{
+  "model_id": "change_vqa",
+  "name": "Paired-Image Change VQA",
+  "architecture": "Siamese ResNet50 + Bitemporal Cross-Attention Language Head",
+  "training_time_seconds": 127.76,
+  "epochs": 12,
+  "best_combined_val_acc": 72.5,
+  "history": [
+    {
+      "epoch": 1,
+      "train_loss": 2.289,
+      "train_presence_acc": 85.31,
+      "train_category_acc": 45.94,
+      "val_presence_acc": 85.0,
+      "val_category_acc": 58.13
+    },
+    {
+      "epoch": 2,
+      "train_loss": 1.536,
+      "train_presence_acc": 86.72,
+      "train_category_acc": 62.97,
+      "val_presence_acc": 85.0,
+      "val_category_acc": 57.5
+    },
+    {
+      "epoch": 3,
+      "train_loss": 1.6211,
+      "train_presence_acc": 87.03,
+      "train_category_acc": 62.81,
+      "val_presence_acc": 85.0,
+      "val_category_acc": 58.13
+    },
+    {
+      "epoch": 4,
+      "train_loss": 1.5119,
+      "train_presence_acc": 87.03,
+      "train_category_acc": 65.78,
+      "val_presence_acc": 85.0,
+      "val_category_acc": 58.75
+    },
+    {
+      "epoch": 5,
+      "train_loss": 1.4851,
+      "train_presence_acc": 87.19,
+      "train_category_acc": 65.31,
+      "val_presence_acc": 85.0,
+      "val_category_acc": 58.13
+    },
+    {
+      "epoch": 6,
+      "train_loss": 1.4761,
+      "train_presence_acc": 87.03,
+      "train_category_acc": 66.09,
+      "val_presence_acc": 85.0,
+      "val_category_acc": 60.0
+    },
+    {
+      "epoch": 7,
+      "train_loss": 1.474,
+      "train_presence_acc": 87.03,
+      "train_category_acc": 65.47,
+      "val_presence_acc": 85.0,
+      "val_category_acc": 59.38
+    },
+    {
+      "epoch": 8,
+      "train_loss": 1.4598,
+      "train_presence_acc": 87.03,
+      "train_category_acc": 67.34,
+      "val_presence_acc": 85.0,
+      "val_category_acc": 60.0
+    },
+    {
+      "epoch": 9,
+      "train_loss": 1.4514,
+      "train_presence_acc": 87.03,
+      "train_category_acc": 65.94,
+      "val_presence_acc": 85.0,
+      "val_category_acc": 59.38
+    },
+    {
+      "epoch": 10,
+      "train_loss": 1.4704,
+      "train_presence_acc": 87.03,
+      "train_category_acc": 66.25,
+      "val_presence_acc": 85.0,
+      "val_category_acc": 56.88
+    },
+    {
+      "epoch": 11,
+      "train_loss": 1.4304,
+      "train_presence_acc": 87.03,
+      "train_category_acc": 67.03,
+      "val_presence_acc": 85.0,
+      "val_category_acc": 56.88
+    },
+    {
+      "epoch": 12,
+      "train_loss": 1.4381,
+      "train_presence_acc": 87.03,
+      "train_category_acc": 66.56,
+      "val_presence_acc": 85.0,
+      "val_category_acc": 60.0
+    }
+  ],
+  "temporal_verification": {
+    "forward_prediction": "no_change",
+    "reverse_prediction": "no_change",
+    "directionality_verified": false
+  },
+  "checkpoint_path": "C:\\Users\\HP\\earthquery\\models\\ChangeVQA\\change_vqa_best.pt"
+}

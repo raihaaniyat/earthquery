@@ -1,0 +1,148 @@
+schema_version: "1.0"
+models:
+  internvl3:
+    id: "internvl3"
+    name: "InternVL3-2B"
+    task: "vqa"
+    architecture: "InternVLChatModel (Vision Transformer + Qwen2.5-2B)"
+    source_url: "https://huggingface.co/OpenGVLab/InternVL3-2B"
+    checkpoint_path: "models/InternVL3-2B"
+    environment: "satquery-core"
+    verification_state: "LOAD_TESTED"
+    device: "cuda"
+    vram_required_gb: 4.0
+    cudnn_enabled: false
+    supported_inputs:
+      - "single_image"
+      - "benchmark_jpg_png"
+      - "geotiff_rgb"
+    contract:
+      max_tiles: 6
+      max_tokens: 512
+      batch_size: 1
+      output_type: "text_answer"
+    notes: "Single-image VQA and image captioning on RTX 5060 laptop. cuDNN disabled for Blackwell CC 12.0 stability."
+
+  croma:
+    id: "croma"
+    name: "CROMA-Base"
+    task: "feature_extraction"
+    architecture: "Dual/Joint Vision Transformer (ViT-B)"
+    source_url: "https://github.com/antofuller/CROMA"
+    checkpoint_path: "models/CROMA/CROMA_base.pt"
+    environment: "satquery-core"
+    verification_state: "LOAD_TESTED"
+    device: "cuda"
+    vram_required_gb: 2.5
+    cudnn_enabled: false
+    supported_inputs:
+      - "optical_sar_pair"
+      - "sentinel1_sentinel2"
+    contract:
+      optical_bands: 12
+      sar_polarizations: 2
+      spatial_size: [120, 120]
+      output_type: "feature_tensors"
+    notes: "Extracts unimodal and cross-modal optical-SAR features from Sentinel-1 and Sentinel-2. Does not generate synthetic images or text."
+
+  changeformer:
+    id: "changeformer"
+    name: "ChangeFormerV6"
+    task: "bitemporal_change"
+    architecture: "Siamese Transformer Encoder + Multiscale Feature Decoder"
+    source_url: "https://github.com/wgcban/ChangeFormer"
+    checkpoint_path: "models/ChangeFormer/CD_ChangeFormerV6_LEVIR_b16_lr0.0001_adamw_train_test_200_linear_ce_multi_train_True_multi_infer_False_shuffle_AB_False_embed_dim_256/best_ckpt.pt"
+    environment: "satquery-changeformer"
+    verification_state: "LOAD_TESTED"
+    device: "cpu"
+    vram_required_gb: 0.0
+    ram_required_gb: 3.5
+    supported_inputs:
+      - "bitemporal_optical"
+      - "pair_t1_t2"
+    contract:
+      tile_size: 256
+      stride: 256
+      channels: 3
+      output_type: "binary_mask"
+    notes: "Trained on LEVIR-CD building change. Reconstructs full-resolution 2D binary change masks (0=unchanged, 1=changed)."
+
+  upernet:
+    id: "upernet"
+    name: "UPerNet ConvNeXt-Tiny"
+    task: "land_cover_segmentation"
+    architecture: "UperNetForSemanticSegmentation (ConvNeXt backbone)"
+    source_url: "https://huggingface.co/openmmlab/upernet-convnext-tiny"
+    checkpoint_path: "models/upernet-convnext-tiny"
+    environment: "satquery-core"
+    verification_state: "LOAD_TESTED"
+    device: "cuda"
+    vram_required_gb: 2.0
+    cudnn_enabled: false
+    supported_inputs:
+      - "single_image"
+      - "geotiff_rgb"
+    contract:
+      channels: 3
+      output_type: "semantic_segmentation_mask"
+      label_map: "ADE20K (Demo classes; generic land-cover proxy)"
+    notes: "Demo land-cover segmentation backbone. Full satellite surface water/built-up classification requires a domain-trained head."
+
+  geoground:
+    id: "geoground"
+    name: "OWLv2 GeoGround"
+    task: "visual_grounding"
+    architecture: "Owlv2ForObjectDetection (ViT-B/16)"
+    source_url: "https://huggingface.co/google/owlv2-base-patch16-ensemble"
+    checkpoint_path: "google/owlv2-base-patch16-ensemble"
+    environment: "satquery-core"
+    verification_state: "LOAD_TESTED"
+    device: "cuda"
+    vram_required_gb: 1.2
+    supported_inputs:
+      - "single_image_grounding"
+      - "single_image"
+      - "benchmark_jpg_png"
+      - "geotiff_rgb"
+    contract:
+      output_type: "bounding_boxes"
+      threshold: 0.1
+    notes: "Open-vocabulary zero-shot visual grounding and object localization using OWLv2. Replaces oversized GeoGround-7B (13GB) to operate strictly within 6 GB VRAM limit (~590 MiB allocated)."
+
+  change_vqa:
+    id: "change_vqa"
+    name: "Paired-Image Change VQA"
+    task: "change_vqa"
+    architecture: "Siamese VLM Cross-Attention Head"
+    source_url: "SatQuery Custom Architecture"
+    checkpoint_path: "models/ChangeVQA/change_vqa_best.pt"
+    environment: "satquery-core"
+    verification_state: "LOAD_TESTED"
+    device: "cuda"
+    vram_required_gb: 1.8
+    supported_inputs:
+      - "bitemporal_optical"
+      - "pair_t1_t2"
+      - "natural_language_query"
+    contract:
+      output_type: "text_answer"
+    notes: "Trained on CDVQA benchmark for bitemporal satellite change reasoning using Siamese VLM Cross-Attention architecture."
+
+  optical_sar_head:
+    id: "optical_sar_head"
+    name: "Optical-SAR Classification Head"
+    task: "optical_sar_classification"
+    architecture: "Multimodal Contrastive Projection Head"
+    source_url: "SatQuery Custom Architecture"
+    checkpoint_path: "models/CROMA/optical_sar_head_best.pt"
+    environment: "satquery-core"
+    verification_state: "LOAD_TESTED"
+    device: "cuda"
+    vram_required_gb: 2.5
+    supported_inputs:
+      - "optical_sar_pair"
+      - "sentinel1_sentinel2"
+    contract:
+      output_type: "multilabel_classification"
+      classes: 19
+    notes: "Trained on BigEarthNet-MM / SEN1-2 CORINE classes using CROMA cross-modal ViT-B representations."
