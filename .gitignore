@@ -1,0 +1,75 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments & Conda
+.env
+.venv
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Environment configuration
+.env
+!.env.example
+
+# Large binary checkpoints & Weights (exceeding GitHub 100MB limit)
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.onnx
+*.zip
+*.tar.gz
+*.tgz
+*.7z
+.cache/
+models/**/.cache/
+models/**/download/
+models/**/trees/
+
+# Data & Datasets
+data/raw/
+data/processed/
+data/benchmarks/
+uploads/
+artifacts/
+storage/
+cache/
+
+# Node / Frontend
+node_modules/
+dist/
+.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.pids.json
+*.log
+
