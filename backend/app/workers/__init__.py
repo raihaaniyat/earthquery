@@ -1,0 +1,3 @@
+"""
+SatQuery Worker Module
+"""
