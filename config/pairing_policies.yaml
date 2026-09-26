@@ -1,0 +1,29 @@
+schema_version: "1.0"
+pairing_policies:
+  bitemporal_optical:
+    version: "1.0"
+    min_time_gap_seconds: 3600.0          # Must have at least 1 hour separation
+    max_time_gap_days: 730                # Up to 2 years
+    min_overlap_fraction: 0.10            # At least 10% spatial overlap
+    max_resolution_ratio: 3.0             # Pixel sizes must not diverge by > 3x
+    allowed_sensor_families:
+      - "Sentinel-2"
+      - "Landsat-8"
+      - "Landsat-9"
+      - "Benchmark"
+    require_alignment_check: true
+    max_alignment_error_px: 2.0
+
+  optical_sar:
+    version: "1.0"
+    max_time_gap_days: 14                 # Near-contemporaneous acquisition (<= 14 days)
+    min_overlap_fraction: 0.10            # At least 10% spatial overlap
+    optical_sensor_families:
+      - "Sentinel-2"
+    sar_sensor_families:
+      - "Sentinel-1"
+    required_sar_polarizations:
+      - "VV"
+      - "VH"
+    required_optical_bands: 12
+    require_joint_calibration: true
