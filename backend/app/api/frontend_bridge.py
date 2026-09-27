@@ -11,11 +11,14 @@ import os
 import json
 import uuid
 import asyncio
+import logging
 from typing import Dict, Any, Optional, List, Tuple
 from pathlib import Path
 from fastapi import APIRouter, Request, HTTPException, Depends, status
 from fastapi.responses import JSONResponse, FileResponse
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from backend.app.config import settings
 from backend.app.db.session import get_db, check_db_connection
@@ -77,6 +80,14 @@ async def parse_request_data_and_files(request: Request) -> Tuple[Dict[str, Any]
                     uploaded_files.append(uf)
 
         for uf in uploaded_files:
+            if not uf.filename:
+                continue
+            ext = os.path.splitext(uf.filename)[1].lower()
+            if ext and ext not in ('.png', '.jpg', '.jpeg', '.tif', '.tiff', '.webp', '.bmp', '.jp2'):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Unsupported file format '{ext}'. Supported formats: .tif, .tiff, .png, .jpg, .jpeg, .webp, .bmp, .jp2."
+                )
             save_name = f"{uuid.uuid4().hex}_{uf.filename}"
             save_path = os.path.join(UPLOAD_DIR, save_name)
             content = await uf.read()
@@ -95,12 +106,15 @@ async def parse_request_data_and_files(request: Request) -> Tuple[Dict[str, Any]
 async def poll_job_or_format(
     result: Dict[str, Any],
     target_model_id: str,
-    timeout_seconds: float = 25.0
+    timeout_seconds: float = 25.0,
+    fallback_params: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
     Formats the task router execution result into the frontend AnalysisResponse.
     If the task was queued to an RQ worker, polls briefly for completion so that
     fast tasks return their real outputs synchronously to the user interface.
+    If the worker is not active or times out, immediately falls back to direct
+    synchronous execution so the user always receives a genuine answer.
     """
     result_status = result.get("status", "UNKNOWN")
     response: Dict[str, Any] = {
@@ -126,25 +140,35 @@ async def poll_job_or_format(
                             if isinstance(exec_result, dict):
                                 meta = exec_result.get("output_metadata", {})
                                 response["summary"] = (
+                                    exec_result.get("summary") or
                                     meta.get("answer") or
                                     meta.get("summary") or
                                     exec_result.get("answer") or
-                                    exec_result.get("summary") or
                                     str(meta or exec_result)
                                 )
-                                if "predictions" in meta:
-                                    for pred in meta.get("predictions", []):
-                                        response["findings"].append({
-                                            "label": pred.get("label", "Detection"),
-                                            "detail": f"Score: {pred.get('score', 'N/A')}",
-                                            "confidence": pred.get("score")
-                                        })
-                                if "classes" in meta:
-                                    for cls_name, cls_val in meta.get("classes", {}).items():
-                                        response["findings"].append({
-                                            "label": cls_name,
-                                            "detail": f"Probability: {cls_val}",
-                                        })
+                                if exec_result.get("findings"):
+                                    response["findings"] = exec_result["findings"]
+                                else:
+                                    if "predictions" in meta:
+                                        for pred in meta.get("predictions", []):
+                                            response["findings"].append({
+                                                "label": pred.get("label", "Detection"),
+                                                "detail": f"Score: {pred.get('score', 'N/A')}",
+                                                "confidence": pred.get("score")
+                                            })
+                                    if "classes" in meta:
+                                        for cls_name, cls_val in meta.get("classes", {}).items():
+                                            response["findings"].append({
+                                                "label": cls_name,
+                                                "detail": f"Probability: {cls_val}",
+                                            })
+
+                                if exec_result.get("sections"):
+                                    response["sections"] = exec_result["sections"]
+
+                                if exec_result.get("participating_models"):
+                                    response["model"] = " + ".join(exec_result["participating_models"])
+
                                 metrics_data = exec_result.get("metrics") or {}
                                 if hasattr(metrics_data, "model_dump"):
                                     metrics_data = metrics_data.model_dump()
@@ -157,10 +181,12 @@ async def poll_job_or_format(
                                 if "change_mask" in assets:
                                     mask_rel = Path(assets["change_mask"]).name
                                     response["maskUrl"] = f"/api/assets/{mask_rel}"
+                                elif "segmentation_mask" in assets:
+                                    mask_rel = Path(assets["segmentation_mask"]).name
+                                    response["maskUrl"] = f"/api/assets/{mask_rel}"
                             break
                         elif job.is_failed:
-                            response["summary"] = f"Job failed: {job.exc_info or 'Worker execution failure'}"
-                            response["validation"] = "failed"
+                            logger.warning(f"Worker job {job_id} reported failure: {job.exc_info}. Executing direct fallback.")
                             break
                     except Exception:
                         pass
@@ -168,8 +194,32 @@ async def poll_job_or_format(
                 pass
 
         if not response.get("summary"):
-            response["summary"] = f"Analysis job queued successfully. Model: {result.get('model', 'unknown')}. Job ID: {job_id}"
-            response["metrics"] = {"job_id": job_id, "status": "queued"}
+            if fallback_params:
+                logger.info("Worker did not return in time or queue was idle. Executing multi-model pipeline synchronously.")
+                from backend.app.services.multi_model_pipeline import run_multi_model_pipeline
+                fallback_res = run_multi_model_pipeline(
+                    file_paths=fallback_params.get("file_paths", []),
+                    prompt=fallback_params.get("prompt", "Analyze this imagery."),
+                    pair_type=fallback_params.get("pair_type", "single_image"),
+                    user_intent=fallback_params.get("task", "scene_description"),
+                    diagnostic_override=fallback_params.get("diagnostic_override")
+                )
+                response["summary"] = fallback_res.get("summary", "")
+                response["findings"] = fallback_res.get("findings", [])
+                response["sections"] = fallback_res.get("sections", {})
+                if fallback_res.get("participating_models"):
+                    response["model"] = " + ".join(fallback_res["participating_models"])
+                response["metrics"] = {"status": "completed"}
+                assets = fallback_res.get("output_assets", {})
+                if "change_mask" in assets:
+                    mask_rel = Path(assets["change_mask"]).name
+                    response["maskUrl"] = f"/api/assets/{mask_rel}"
+                elif "segmentation_mask" in assets:
+                    mask_rel = Path(assets["segmentation_mask"]).name
+                    response["maskUrl"] = f"/api/assets/{mask_rel}"
+            else:
+                response["summary"] = f"Analysis job queued successfully. Model: {result.get('model', 'unknown')}. Job ID: {job_id}"
+                response["metrics"] = {"job_id": job_id, "status": "queued"}
 
     elif result_status == "EXECUTED_ISOLATED":
         exec_result = result.get("execution_result", {})
@@ -177,23 +227,46 @@ async def poll_job_or_format(
             meta = exec_result.get("output_metadata", {})
             response["summary"] = (
                 result.get("summary") or
+                exec_result.get("summary") or
                 meta.get("answer") or
                 meta.get("summary") or
                 exec_result.get("answer") or
-                exec_result.get("summary") or
                 str(meta or exec_result)
             )
-            for pred in (meta.get("predictions") or exec_result.get("predictions", [])):
-                response["findings"].append({
-                    "label": pred.get("label", "Detection"),
-                    "detail": f"Score: {pred.get('score', 'N/A')}",
-                    "confidence": pred.get("score")
-                })
-            for cls_name, cls_val in (meta.get("classes") or exec_result.get("classes", {})).items():
-                response["findings"].append({
-                    "label": cls_name,
-                    "detail": f"Probability: {cls_val}",
-                })
+            if exec_result.get("findings"):
+                response["findings"] = exec_result["findings"]
+            elif result.get("findings"):
+                response["findings"] = result["findings"]
+            else:
+                for pred in (meta.get("predictions") or exec_result.get("predictions", [])):
+                    response["findings"].append({
+                        "label": pred.get("label", "Detection"),
+                        "detail": f"Score: {pred.get('score', 'N/A')}",
+                        "confidence": pred.get("score")
+                    })
+                for cls_name, cls_val in (meta.get("classes") or exec_result.get("classes", {})).items():
+                    response["findings"].append({
+                        "label": cls_name,
+                        "detail": f"Probability: {cls_val}",
+                    })
+
+            if exec_result.get("sections"):
+                response["sections"] = exec_result["sections"]
+            elif result.get("sections"):
+                response["sections"] = result["sections"]
+
+            if exec_result.get("participating_models"):
+                response["model"] = " + ".join(exec_result["participating_models"])
+            elif result.get("participating_models"):
+                response["model"] = " + ".join(result["participating_models"])
+
+            assets = exec_result.get("output_assets", {}) or result.get("output_assets", {})
+            if "change_mask" in assets:
+                mask_rel = Path(assets["change_mask"]).name
+                response["maskUrl"] = f"/api/assets/{mask_rel}"
+            elif "segmentation_mask" in assets:
+                mask_rel = Path(assets["segmentation_mask"]).name
+                response["maskUrl"] = f"/api/assets/{mask_rel}"
         else:
             response["summary"] = str(result.get("summary") or exec_result)
         response["metrics"] = {"status": "completed"}
@@ -204,9 +277,9 @@ async def poll_job_or_format(
         response["summary"] = result.get("message", f"Task dispatched with status: {result_status}")
 
     # Pass scientific evidence sections if available
-    if "sections" in result:
+    if "sections" in result and not response.get("sections"):
         response["sections"] = result["sections"]
-    elif result.get("evidence_bundle"):
+    elif result.get("evidence_bundle") and not response.get("sections"):
         response["sections"] = format_scientific_sections(
             result["evidence_bundle"],
             response.get("summary", ""),
@@ -309,8 +382,14 @@ async def frontend_analysis(
     routed = task_router_app.invoke(state_input)
     model_id = routed.get("target_model_id", target_model_id or "unknown")
     result = routed.get("result", {})
-
-    return await poll_job_or_format(result, model_id)
+    fallback_params = {
+        "file_paths": file_paths,
+        "prompt": prompt,
+        "pair_type": pair_type if len(file_paths) >= 2 else "single_image",
+        "task": task,
+        "diagnostic_override": target_model_id or None
+    }
+    return await poll_job_or_format(result, model_id, fallback_params=fallback_params)
 
 
 # ----- /api/change-detection -----
@@ -346,7 +425,14 @@ async def frontend_change_detection(
     model_id = routed.get("target_model_id", "changeformer")
     result = routed.get("result", {})
 
-    return await poll_job_or_format(result, model_id)
+    fallback_params = {
+        "file_paths": file_paths,
+        "prompt": prompt,
+        "pair_type": "bitemporal" if len(file_paths) >= 2 else "single_image",
+        "task": "change_detection",
+        "diagnostic_override": data.get("model") or None
+    }
+    return await poll_job_or_format(result, model_id, fallback_params=fallback_params)
 
 
 # ----- /api/prediction -----
@@ -383,7 +469,14 @@ async def frontend_prediction(
     model_id = routed.get("target_model_id", "geoground")
     result = routed.get("result", {})
 
-    return await poll_job_or_format(result, model_id)
+    fallback_params = {
+        "file_paths": file_paths,
+        "prompt": prompt,
+        "pair_type": "single_image",
+        "task": task,
+        "diagnostic_override": data.get("model") or None
+    }
+    return await poll_job_or_format(result, model_id, fallback_params=fallback_params)
 
 
 # ----- /api/search (STAC proxy) -----

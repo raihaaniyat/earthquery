@@ -5,11 +5,14 @@ and model registry contracts.
 """
 
 import os
+import logging
 from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+logger = logging.getLogger("satquery.api")
 
 from backend.app.config import settings
 from backend.app.models_registry import list_models, get_model
@@ -56,6 +59,22 @@ async def custom_http_exception_handler(request: Request, exc: HTTPException):
                 "code": f"HTTP_{exc.status_code}",
                 "message": exc.detail if isinstance(exc.detail, str) else "Request error",
                 "details": exc.detail if not isinstance(exc.detail, str) else None
+            },
+            "path": request.url.path
+        }
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.error("Unhandled server exception at %s: %s", request.url.path, exc, exc_info=True)
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "error": {
+                "code": "INTERNAL_SERVER_ERROR",
+                "message": f"An unexpected error occurred during processing: {type(exc).__name__}: {str(exc)}",
+                "details": None
             },
             "path": request.url.path
         }
@@ -158,4 +177,13 @@ def dispatch_task(request: TaskDispatchRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("backend.app.main:app", host=settings.API_HOST, port=settings.API_PORT, reload=False)
+    config = uvicorn.Config(
+        "backend.app.main:app",
+        host=settings.API_HOST,
+        port=settings.API_PORT,
+        log_level=settings.LOG_LEVEL.lower(),
+        loop="asyncio"
+    )
+    server = uvicorn.Server(config)
+    server.run()
+

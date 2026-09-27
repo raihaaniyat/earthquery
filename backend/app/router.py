@@ -40,8 +40,10 @@ from backend.app.tasks.inference_tasks import (
     execute_upernet_task,
     execute_geoground_task,
     execute_change_vqa_task,
-    execute_optical_sar_task
+    execute_optical_sar_task,
+    execute_pipeline_task
 )
+from backend.app.services.multi_model_pipeline import run_multi_model_pipeline
 
 
 class RouterState(TypedDict):
@@ -241,34 +243,66 @@ def node_dispatch_or_execute(state: RouterState) -> Dict[str, Any]:
             }
         }
 
+    diagnostic_override = state.get("diagnostic_override") or (
+        state.get("target_model_id") if state.get("diagnostic_mode") else None
+    )
+
     q = get_queue() if dispatch_mode not in ("direct", "isolated") else None
+    if q is not None:
+        try:
+            from rq import Worker
+            workers = Worker.all(connection=q.connection)
+            has_active = any(q.name in [queue.name for queue in w.queues] for w in workers)
+            if not has_active:
+                logger.info(f"No active RQ worker found listening on queue '{q.name}'. Falling back to synchronous execution.")
+                q = None
+        except Exception as e:
+            logger.warning(f"Could not inspect RQ workers ({e}). Proceeding to synchronous execution.")
+            q = None
 
     # Worker queue dispatch
     if q is not None:
-        if model_id == "internvl3":
-            job = q.enqueue(execute_internvl_task, default_img, state.get("prompt", ""))
-        elif model_id == "croma":
-            s1 = files[0] if len(files) > 0 and os.path.exists(files[0]) else "data/samples/sample_sar.tif"
-            s2 = files[1] if len(files) > 1 and os.path.exists(files[1]) else default_img
-            job = q.enqueue(execute_croma_task, sentinel_1_path=s1, sentinel_2_path=s2)
-        elif model_id == "changeformer":
-            t1 = files[0] if len(files) > 0 and os.path.exists(files[0]) else "data/samples/sample_optical.png"
-            t2 = files[1] if len(files) > 1 and os.path.exists(files[1]) else t1
-            job = q.enqueue(execute_changeformer_task, t1, t2)
-        elif model_id == "upernet":
-            job = q.enqueue(execute_upernet_task, default_img)
-        elif model_id in ("geoground", "owlv2"):
-            job = q.enqueue(execute_geoground_task, default_img, state.get("prompt", ""))
-        elif model_id == "change_vqa":
-            t1 = files[0] if len(files) > 0 and os.path.exists(files[0]) else "data/samples/sample_optical.png"
-            t2 = files[1] if len(files) > 1 and os.path.exists(files[1]) else t1
-            job = q.enqueue(execute_change_vqa_task, t1, t2, state.get("prompt", ""))
-        elif model_id == "optical_sar_head":
-            s1 = files[0] if len(files) > 0 and os.path.exists(files[0]) else "data/samples/sample_sar.tif"
-            s2 = files[1] if len(files) > 1 and os.path.exists(files[1]) else default_img
-            job = q.enqueue(execute_optical_sar_task, sentinel_1_path=s1, sentinel_2_path=s2)
+        if diagnostic_override:
+            if diagnostic_override == "internvl3":
+                job = q.enqueue(execute_internvl_task, default_img, state.get("prompt", ""))
+            elif diagnostic_override == "croma":
+                s1 = files[0] if len(files) > 0 and os.path.exists(files[0]) else "data/samples/sample_sar.tif"
+                s2 = files[1] if len(files) > 1 and os.path.exists(files[1]) else default_img
+                job = q.enqueue(execute_croma_task, sentinel_1_path=s1, sentinel_2_path=s2)
+            elif diagnostic_override == "changeformer":
+                t1 = files[0] if len(files) > 0 and os.path.exists(files[0]) else "data/samples/sample_optical.png"
+                t2 = files[1] if len(files) > 1 and os.path.exists(files[1]) else t1
+                job = q.enqueue(execute_changeformer_task, t1, t2)
+            elif diagnostic_override == "upernet":
+                job = q.enqueue(execute_upernet_task, default_img)
+            elif diagnostic_override in ("geoground", "owlv2"):
+                job = q.enqueue(execute_geoground_task, default_img, state.get("prompt", ""))
+            elif diagnostic_override == "change_vqa":
+                t1 = files[0] if len(files) > 0 and os.path.exists(files[0]) else "data/samples/sample_optical.png"
+                t2 = files[1] if len(files) > 1 and os.path.exists(files[1]) else t1
+                job = q.enqueue(execute_change_vqa_task, t1, t2, state.get("prompt", ""))
+            elif diagnostic_override == "optical_sar_head":
+                s1 = files[0] if len(files) > 0 and os.path.exists(files[0]) else "data/samples/sample_sar.tif"
+                s2 = files[1] if len(files) > 1 and os.path.exists(files[1]) else default_img
+                job = q.enqueue(execute_optical_sar_task, sentinel_1_path=s1, sentinel_2_path=s2)
+            else:
+                job = q.enqueue(
+                    execute_pipeline_task,
+                    file_paths=files if files else [default_img],
+                    prompt=state.get("prompt", ""),
+                    pair_type=state.get("pair_type", "single_image"),
+                    user_intent=task,
+                    diagnostic_override=diagnostic_override
+                )
         else:
-            job = None
+            job = q.enqueue(
+                execute_pipeline_task,
+                file_paths=files if files else [default_img],
+                prompt=state.get("prompt", ""),
+                pair_type=state.get("pair_type", "single_image"),
+                user_intent=task,
+                diagnostic_override=None
+            )
 
         return {
             "result": {
@@ -282,44 +316,71 @@ def node_dispatch_or_execute(state: RouterState) -> Dict[str, Any]:
         }
 
     # Direct synchronous execution fallback
-    if model_id == "internvl3":
-        exec_res = execute_internvl_task(default_img, state.get("prompt", ""))
-    elif model_id == "changeformer":
-        t1 = files[0] if len(files) > 0 and os.path.exists(files[0]) else "data/samples/sample_optical.png"
-        t2 = files[1] if len(files) > 1 and os.path.exists(files[1]) else t1
-        exec_res = execute_changeformer_task(t1, t2)
-    elif model_id in ("geoground", "owlv2"):
-        exec_res = execute_geoground_task(default_img, state.get("prompt", ""))
-    elif model_id == "upernet":
-        exec_res = execute_upernet_task(default_img)
-    elif model_id == "croma":
-        s1 = files[0] if len(files) > 0 and os.path.exists(files[0]) else "data/samples/sample_sar.tif"
-        s2 = files[1] if len(files) > 1 and os.path.exists(files[1]) else default_img
-        exec_res = execute_croma_task(sentinel_1_path=s1, sentinel_2_path=s2)
-    elif model_id == "change_vqa":
-        t1 = files[0] if len(files) > 0 and os.path.exists(files[0]) else "data/samples/sample_optical.png"
-        t2 = files[1] if len(files) > 1 and os.path.exists(files[1]) else t1
-        exec_res = execute_change_vqa_task(t1, t2, state.get("prompt", ""))
-    elif model_id == "optical_sar_head":
-        s1 = files[0] if len(files) > 0 and os.path.exists(files[0]) else "data/samples/sample_sar.tif"
-        s2 = files[1] if len(files) > 1 and os.path.exists(files[1]) else default_img
-        exec_res = execute_optical_sar_task(sentinel_1_path=s1, sentinel_2_path=s2)
-    else:
-        exec_res = {"status": "UNKNOWN_TASK"}
-
-    # Format sections
-    narrative = exec_res.get("output_metadata", {}).get("answer") or str(exec_res)
-    sections = format_scientific_sections(bundle, narrative, desc.name if desc else model_id) if bundle else {}
-
-    return {
-        "result": {
-            "status": "EXECUTED_ISOLATED",
-            "execution_result": exec_res,
-            "summary": narrative,
-            "sections": sections,
-            "decision_reason": decision.get("decision_reason")
+    if diagnostic_override:
+        if diagnostic_override == "internvl3":
+            exec_res = execute_internvl_task(default_img, state.get("prompt", ""))
+        elif diagnostic_override == "changeformer":
+            t1 = files[0] if len(files) > 0 and os.path.exists(files[0]) else "data/samples/sample_optical.png"
+            t2 = files[1] if len(files) > 1 and os.path.exists(files[1]) else t1
+            exec_res = execute_changeformer_task(t1, t2)
+        elif diagnostic_override in ("geoground", "owlv2"):
+            exec_res = execute_geoground_task(default_img, state.get("prompt", ""))
+        elif diagnostic_override == "upernet":
+            exec_res = execute_upernet_task(default_img)
+        elif diagnostic_override == "croma":
+            s1 = files[0] if len(files) > 0 and os.path.exists(files[0]) else "data/samples/sample_sar.tif"
+            s2 = files[1] if len(files) > 1 and os.path.exists(files[1]) else default_img
+            exec_res = execute_croma_task(sentinel_1_path=s1, sentinel_2_path=s2)
+        elif diagnostic_override == "change_vqa":
+            t1 = files[0] if len(files) > 0 and os.path.exists(files[0]) else "data/samples/sample_optical.png"
+            t2 = files[1] if len(files) > 1 and os.path.exists(files[1]) else t1
+            exec_res = execute_change_vqa_task(t1, t2, state.get("prompt", ""))
+        elif diagnostic_override == "optical_sar_head":
+            s1 = files[0] if len(files) > 0 and os.path.exists(files[0]) else "data/samples/sample_sar.tif"
+            s2 = files[1] if len(files) > 1 and os.path.exists(files[1]) else default_img
+            exec_res = execute_optical_sar_task(sentinel_1_path=s1, sentinel_2_path=s2)
+        else:
+            exec_res = run_multi_model_pipeline(
+                file_paths=files if files else [default_img],
+                prompt=state.get("prompt", ""),
+                pair_type=state.get("pair_type", "single_image"),
+                user_intent=task,
+                diagnostic_override=diagnostic_override
+            )
+        narrative = exec_res.get("summary") or exec_res.get("output_metadata", {}).get("answer") or str(exec_res)
+        sections = exec_res.get("sections") or (format_scientific_sections(bundle, narrative, desc.name if desc else model_id) if bundle else {})
+        return {
+            "result": {
+                "status": "EXECUTED_ISOLATED",
+                "execution_result": exec_res,
+                "summary": narrative,
+                "sections": sections,
+                "findings": exec_res.get("findings", []),
+                "decision_reason": decision.get("decision_reason")
+            }
         }
-    }
+    else:
+        exec_res = run_multi_model_pipeline(
+            file_paths=files if files else [default_img],
+            prompt=state.get("prompt", ""),
+            pair_type=state.get("pair_type", "single_image"),
+            user_intent=task,
+            diagnostic_override=None
+        )
+        narrative = exec_res.get("summary", "")
+        sections = exec_res.get("sections") or (format_scientific_sections(bundle, narrative, desc.name if desc else model_id) if bundle else {})
+        return {
+            "result": {
+                "status": "EXECUTED_ISOLATED",
+                "execution_result": exec_res,
+                "summary": narrative,
+                "sections": sections,
+                "findings": exec_res.get("findings", []),
+                "output_assets": exec_res.get("output_assets", {}),
+                "participating_models": exec_res.get("participating_models", []),
+                "decision_reason": decision.get("decision_reason")
+            }
+        }
 
 
 # Construct StateGraph with the complete scientific pipeline

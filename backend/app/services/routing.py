@@ -184,8 +184,15 @@ def parse_user_intent(
         requested_measurements = ["bitemporal_difference", "changed_area_km2"]
         output_type = "mask"
 
-    # Visual grounding intent
-    elif any(k in q_lower for k in ["find", "locate", "detect", "ground", "where are", "count", "bounding box", "owlv2", "owl", "geoground"]):
+    # General scene description / visual questioning (takes precedence over generic 'find' words)
+    elif any(k in q_lower for k in ["what is", "image type", "what does", "what have", "what are", "describe", "explain", "scene type"]):
+        intent = "scene_description"
+        output_type = "narrative"
+
+    # Visual grounding intent (explicit object localization)
+    elif any(k in q_lower for k in ["locate", "detect", "ground", "where are", "count", "bounding box", "owlv2", "owl", "geoground"]) or (
+        "find" in q_lower and any(obj in q_lower for obj in ["building", "vehicle", "ship", "car", "plane", "aircraft", "structure", "road"])
+    ):
         intent = "visual_grounding"
         output_type = "mask"
 

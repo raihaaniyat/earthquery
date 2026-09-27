@@ -6,7 +6,7 @@ Zero PyTorch or NumPy imports in this module.
 
 import os
 import uuid
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from pathlib import Path
 
 from backend.app.config import settings
@@ -14,7 +14,7 @@ from backend.runtime.protocol import SubprocessRequest, SubprocessResponse
 from backend.runtime.supervisor import supervisor
 
 
-def execute_internvl_task(image_path: str, prompt: str = "Describe this satellite scene.") -> Dict[str, Any]:
+def execute_internvl_task(image_path: str, prompt: str = "Describe this satellite scene.", context: str = "") -> Dict[str, Any]:
     """Executes single-image VQA using InternVL3-2B in satquery-core."""
     req_id = str(uuid.uuid4())
     out_dir = str(Path(settings.SATQUERY_STORAGE_ROOT) / "scratch" / req_id)
@@ -25,7 +25,7 @@ def execute_internvl_task(image_path: str, prompt: str = "Describe this satellit
         model_version_id="internvl3",
         task_type="vqa",
         asset_references={"image": image_path},
-        parameters={"prompt": prompt, "max_tokens": settings.MAX_VQA_TOKENS},
+        parameters={"prompt": prompt, "max_tokens": settings.MAX_VQA_TOKENS, "context": context},
         output_dir=out_dir
     )
     resp: SubprocessResponse = supervisor.run_isolated_step(
@@ -188,6 +188,27 @@ def execute_optical_sar_task(sentinel_1_path: Optional[str] = None, sentinel_2_p
         required_vram_mib=2560
     )
     return resp.model_dump()
+
+
+def execute_pipeline_task(
+    file_paths: List[str],
+    prompt: str = "Analyze this satellite scene.",
+    pair_type: str = "single_image",
+    user_intent: str = "scene_description",
+    diagnostic_override: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Executes the comprehensive multi-model collaborative analysis pipeline.
+    Orchestrates all applicable models sequentially under the GPU lock.
+    """
+    from backend.app.services.multi_model_pipeline import run_multi_model_pipeline
+    return run_multi_model_pipeline(
+        file_paths=file_paths,
+        prompt=prompt,
+        pair_type=pair_type,
+        user_intent=user_intent,
+        diagnostic_override=diagnostic_override
+    )
 
 
 

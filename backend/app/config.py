@@ -67,7 +67,7 @@ class Settings(BaseSettings):
     MAX_UPLOAD_BYTES: int = 524288000       # 500 MB
     MIN_FREE_DISK_BYTES: int = 10737418240  # 10 GB
     MAX_VQA_TILES: int = 6
-    MAX_VQA_TOKENS: int = 512
+    MAX_VQA_TOKENS: int = 1536
 
     # 7. ISRO / NRSC External Providers (BHOONIDHI & Bhuvan)
     BHOONIDHI_USER_ID: Optional[str] = None
