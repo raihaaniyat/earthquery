@@ -55,39 +55,61 @@ def main():
         processor = AutoImageProcessor.from_pretrained(model_dir)
         model = UperNetForSemanticSegmentation.from_pretrained(model_dir).to(device).eval()
 
-        def load_pil_image(image_path: str) -> Image.Image:
-            try:
-                return Image.open(image_path).convert("RGB")
-            except Exception:
+        def load_pil_image(image_path: str, max_dim: int = 2048) -> Image.Image:
+            is_tiff = image_path.lower().endswith((".tif", ".tiff"))
+            if is_tiff:
                 try:
                     import rasterio
+                    from rasterio.enums import Resampling
                     with rasterio.open(image_path) as src:
-                        data = src.read()
-                        if data.shape[0] >= 3:
-                            rgb = data[:3].transpose(1, 2, 0).astype(np.float32)
+                        count = src.count
+                        w, h = src.width, src.height
+                        scale = min(1.0, max_dim / max(w, h))
+                        out_w = max(int(w * scale), 64)
+                        out_h = max(int(h * scale), 64)
+
+                        if count >= 3:
+                            arr = src.read([1, 2, 3], out_shape=(3, out_h, out_w), resampling=Resampling.bilinear).astype(np.float32)
+                            rgb = arr.transpose(1, 2, 0)
+                        elif count == 2:
+                            b1 = src.read(1, out_shape=(out_h, out_w), resampling=Resampling.bilinear).astype(np.float32)
+                            b2 = src.read(2, out_shape=(out_h, out_w), resampling=Resampling.bilinear).astype(np.float32)
+                            chosen = b2 if np.std(b2) > np.std(b1) else b1
+                            rgb = np.repeat(chosen[:, :, np.newaxis], 3, axis=2)
+                        elif count == 1:
+                            b1 = src.read(1, out_shape=(out_h, out_w), resampling=Resampling.bilinear).astype(np.float32)
+                            rgb = np.repeat(b1[:, :, np.newaxis], 3, axis=2)
                         else:
-                            rgb = np.repeat(data[0, :, :, np.newaxis], 3, axis=2).astype(np.float32)
+                            arr = src.read(out_shape=(count, out_h, out_w), resampling=Resampling.bilinear).astype(np.float32)
+                            rgb = np.repeat(arr[0, :, :, np.newaxis], 3, axis=2)
+
                         p2, p98 = np.percentile(rgb, (2, 98))
                         if p98 > p2:
-                            rgb = np.clip((rgb - p2) / (p98 - p2) * 255.0, 0, 255).astype(np.uint8)
+                            rgb_scaled = np.clip((rgb - p2) / (p98 - p2) * 255.0, 0, 255).astype(np.uint8)
                         else:
-                            rgb = (rgb / max(float(rgb.max()), 1.0) * 255.0).astype(np.uint8)
-                        return Image.fromarray(rgb)
+                            max_v = float(rgb.max())
+                            if max_v > 0:
+                                rgb_scaled = np.clip(rgb / max_v * 255.0, 0, 255).astype(np.uint8)
+                            else:
+                                rgb_scaled = np.zeros_like(rgb, dtype=np.uint8)
+                        return Image.fromarray(rgb_scaled)
                 except Exception:
-                    import tifffile
-                    arr = tifffile.imread(image_path)
-                    if arr.ndim == 3 and arr.shape[2] >= 3:
-                        rgb = arr[:, :, :3].astype(np.float32)
-                    elif arr.ndim == 3 and arr.shape[0] >= 3:
-                        rgb = arr[:3, :, :].transpose(1, 2, 0).astype(np.float32)
-                    else:
-                        rgb = np.repeat(arr[:, :, np.newaxis], 3, axis=2).astype(np.float32)
-                    p2, p98 = np.percentile(rgb, (2, 98))
-                    if p98 > p2:
-                        rgb = np.clip((rgb - p2) / (p98 - p2) * 255.0, 0, 255).astype(np.uint8)
-                    else:
-                        rgb = (rgb / max(float(rgb.max()), 1.0) * 255.0).astype(np.uint8)
-                    return Image.fromarray(rgb)
+                    pass
+
+            try:
+                im = Image.open(image_path)
+                if max(im.size) > max_dim:
+                    scale = max_dim / max(im.size)
+                    im = im.resize((max(int(im.size[0] * scale), 64), max(int(im.size[1] * scale), 64)), Image.Resampling.BILINEAR)
+                if im.mode == "LA":
+                    l, a = im.split()
+                    l_arr = np.array(l)
+                    if np.std(l_arr) == 0 and np.std(np.array(a)) > 0:
+                        return a.convert("RGB")
+                    return l.convert("RGB")
+                return im.convert("RGB")
+            except Exception:
+                return Image.new("RGB", (512, 512), color=(0, 0, 0))
 
         image = load_pil_image(input_image)
         orig_w, orig_h = image.size
@@ -98,9 +120,15 @@ def main():
             outputs = model(**inputs)
             logits = outputs.logits
 
+        # Clamp mask size to at most 1024x1024 to preserve GPU memory (7.5GB limit)
+        mask_max_dim = 1024
+        scale = min(1.0, mask_max_dim / max(orig_h, orig_w))
+        mask_h = max(int(orig_h * scale), 128)
+        mask_w = max(int(orig_w * scale), 128)
+
         upsampled_logits = torch.nn.functional.interpolate(
             logits,
-            size=(orig_h, orig_w),
+            size=(mask_h, mask_w),
             mode="bilinear",
             align_corners=False
         )
@@ -118,6 +146,11 @@ def main():
             cls_name = model.config.id2label.get(int(cls_id), f"class_{cls_id}")
             fraction = round(float(cnt / total_pixels) * 100.0, 2)
             detected_classes.append({"class_id": int(cls_id), "name": cls_name, "percentage": fraction})
+
+        # VRAM cleanup
+        del outputs, logits, upsampled_logits, model, inputs
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         # Sort by largest presence
         detected_classes.sort(key=lambda x: x["percentage"], reverse=True)

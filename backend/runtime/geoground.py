@@ -27,10 +27,28 @@ from backend.runtime.protocol import SubprocessRequest, SubprocessResponse, Subp
 
 
 def parse_prompts(raw_prompt: str) -> list:
+    default_classes = ["building", "structure", "road", "vehicle", "vegetation", "water body", "agricultural field"]
     if not raw_prompt or not raw_prompt.strip():
-        return ["building", "vegetation", "water", "vehicle", "structure"]
+        return default_classes
     
     text = raw_prompt.strip()
+    lower = text.lower()
+
+    # If the user is asking an open-ended question rather than listing targets
+    conversational_indicators = [
+        "what", "type", "image type", "what does", "have in image", "describe", "explain",
+        "how many", "is there", "are there", "find the image", "scene", "tell me"
+    ]
+    if any(ci in lower for ci in conversational_indicators) and not any(k in lower for k in ["locate all", "detect all", "bounding box for"]):
+        # Extract any specific object keywords if mentioned in the question
+        found_targets = []
+        for cand in ["building", "house", "road", "highway", "car", "vehicle", "truck", "ship", "boat", "vessel", "plane", "aircraft", "tree", "forest", "field", "water", "river", "bridge"]:
+            if cand in lower:
+                found_targets.append(cand)
+        if found_targets:
+            return found_targets
+        return default_classes
+
     for prefix in ["locate", "detect", "find", "identify", "ground"]:
         if text.lower().startswith(prefix):
             text = text[len(prefix):].strip()
@@ -48,44 +66,70 @@ def parse_prompts(raw_prompt: str) -> list:
         if parts:
             return parts
 
-    return [text]
+    clean = text.strip(".?! ")
+    if len(clean) > 0 and len(clean.split()) <= 4:
+        return [clean]
+
+    return default_classes
 
 
-def load_pil_image(image_path: str) -> Image.Image:
-    try:
-        return Image.open(image_path).convert("RGB")
-    except Exception:
+def load_pil_image(image_path: str, max_dim: int = 2048) -> Image.Image:
+    is_tiff = image_path.lower().endswith((".tif", ".tiff"))
+    if is_tiff:
         try:
             import rasterio
+            from rasterio.enums import Resampling
             import numpy as np
             with rasterio.open(image_path) as src:
-                data = src.read()
-                if data.shape[0] >= 3:
-                    rgb = data[:3].transpose(1, 2, 0).astype(np.float32)
+                count = src.count
+                w, h = src.width, src.height
+                scale = min(1.0, max_dim / max(w, h))
+                out_w = max(int(w * scale), 64)
+                out_h = max(int(h * scale), 64)
+
+                if count >= 3:
+                    arr = src.read([1, 2, 3], out_shape=(3, out_h, out_w), resampling=Resampling.bilinear).astype(np.float32)
+                    rgb = arr.transpose(1, 2, 0)
+                elif count == 2:
+                    b1 = src.read(1, out_shape=(out_h, out_w), resampling=Resampling.bilinear).astype(np.float32)
+                    b2 = src.read(2, out_shape=(out_h, out_w), resampling=Resampling.bilinear).astype(np.float32)
+                    chosen = b2 if np.std(b2) > np.std(b1) else b1
+                    rgb = np.repeat(chosen[:, :, np.newaxis], 3, axis=2)
+                elif count == 1:
+                    b1 = src.read(1, out_shape=(out_h, out_w), resampling=Resampling.bilinear).astype(np.float32)
+                    rgb = np.repeat(b1[:, :, np.newaxis], 3, axis=2)
                 else:
-                    rgb = np.repeat(data[0, :, :, np.newaxis], 3, axis=2).astype(np.float32)
+                    arr = src.read(out_shape=(count, out_h, out_w), resampling=Resampling.bilinear).astype(np.float32)
+                    rgb = np.repeat(arr[0, :, :, np.newaxis], 3, axis=2)
+
                 p2, p98 = np.percentile(rgb, (2, 98))
                 if p98 > p2:
-                    rgb = np.clip((rgb - p2) / (p98 - p2) * 255.0, 0, 255).astype(np.uint8)
+                    rgb_scaled = np.clip((rgb - p2) / (p98 - p2) * 255.0, 0, 255).astype(np.uint8)
                 else:
-                    rgb = (rgb / max(float(rgb.max()), 1.0) * 255.0).astype(np.uint8)
-                return Image.fromarray(rgb)
+                    max_v = float(rgb.max())
+                    if max_v > 0:
+                        rgb_scaled = np.clip(rgb / max_v * 255.0, 0, 255).astype(np.uint8)
+                    else:
+                        rgb_scaled = np.zeros_like(rgb, dtype=np.uint8)
+                return Image.fromarray(rgb_scaled)
         except Exception:
-            import tifffile
+            pass
+
+    try:
+        im = Image.open(image_path)
+        if max(im.size) > max_dim:
+            scale = max_dim / max(im.size)
+            im = im.resize((max(int(im.size[0] * scale), 64), max(int(im.size[1] * scale), 64)), Image.Resampling.BILINEAR)
+        if im.mode == "LA":
+            l, a = im.split()
             import numpy as np
-            arr = tifffile.imread(image_path)
-            if arr.ndim == 3 and arr.shape[2] >= 3:
-                rgb = arr[:, :, :3].astype(np.float32)
-            elif arr.ndim == 3 and arr.shape[0] >= 3:
-                rgb = arr[:3, :, :].transpose(1, 2, 0).astype(np.float32)
-            else:
-                rgb = np.repeat(arr[:, :, np.newaxis], 3, axis=2).astype(np.float32)
-            p2, p98 = np.percentile(rgb, (2, 98))
-            if p98 > p2:
-                rgb = np.clip((rgb - p2) / (p98 - p2) * 255.0, 0, 255).astype(np.uint8)
-            else:
-                rgb = (rgb / max(float(rgb.max()), 1.0) * 255.0).astype(np.uint8)
-            return Image.fromarray(rgb)
+            l_arr = np.array(l)
+            if np.std(l_arr) == 0 and np.std(np.array(a)) > 0:
+                return a.convert("RGB")
+            return l.convert("RGB")
+        return im.convert("RGB")
+    except Exception:
+        return Image.new("RGB", (512, 512), color=(0, 0, 0))
 
 
 def main():
