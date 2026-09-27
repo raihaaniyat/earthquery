@@ -52,6 +52,9 @@ models/**/trees/
 data/raw/
 data/processed/
 data/benchmarks/
+storage/
+artifacts/logs/
+.pids.json
 /uploads/
 !storage/satquery-inputs/test/roundtrip.bin
 
