@@ -6,6 +6,8 @@ import { AnalysisResult } from '../AnalysisResult';
 import { CurtainViewer } from '../CurtainViewer';
 import type { ChatSession } from '../../types/app';
 
+import { AnalysisPipelineLoading } from '../analysis/AnalysisPipelineLoading';
+
 export function ChatResult({ chat, onRetry }: {chat: ChatSession;onRetry: () => void;}) {
   const { navigate } = useApp();
   const { setComparisonPair, createReport } = useWorkspace();
@@ -23,8 +25,9 @@ export function ChatResult({ chat, onRetry }: {chat: ChatSession;onRetry: () => 
       <div className="msgbody">
         <div className="who">SatQuery AI</div>
         <div className="bubble">
-          {run.status === 'loading' ?
-          <StateNotice state={run} /> :
+          {run.status === 'loading' ? (
+            <AnalysisPipelineLoading message={run.message} />
+          ) : (
 
           <>
               <b>{run.status === 'success' ? 'Analysis complete.' : 'Model analysis did not complete.'}</b>
@@ -46,11 +49,16 @@ export function ChatResult({ chat, onRetry }: {chat: ChatSession;onRetry: () => 
                   </div>
               }
                 <div>
-                  {run.status === 'success' ?
-                <AnalysisResult result={run.data} /> :
-
-                <StateNotice state={run} onRetry={onRetry} />
-                }
+                  {run.status === 'success' ? (
+                    <AnalysisResult 
+                      result={run.data} 
+                      query={chat.query}
+                      attachments={chat.attachments}
+                      task={chat.task}
+                    />
+                  ) : (
+                    <StateNotice state={run} onRetry={onRetry} />
+                  )}
                   <div className="actions-row">
                     {hasPair &&
                   <button
@@ -80,7 +88,7 @@ export function ChatResult({ chat, onRetry }: {chat: ChatSession;onRetry: () => 
                 </div>
               </div>
             </>
-          }
+          )}
         </div>
       </div>
     </div>);

@@ -171,7 +171,12 @@ export function WorkspaceProvider({ children }: {children: React.ReactNode;}) {
       status: statusOf(res),
       summary: res.status === 'success' ? res.data.summary : 'message' in res ? res.message : '',
       aoi,
-      findings: res.status === 'success' ? res.data.findings ?? [] : []
+      findings: res.status === 'success' ? res.data.findings ?? [] : [],
+      model: res.status === 'success' && res.data.model ? res.data.model : undefined,
+      sections: res.status === 'success' ? res.data.sections : undefined,
+      metrics: res.status === 'success' ? res.data.metrics : undefined,
+      maskUrl: res.status === 'success' ? res.data.maskUrl : undefined,
+      decisionReason: res.status === 'success' ? res.data.decision_reason : undefined
     }),
     [logHistory, aoi]
   );

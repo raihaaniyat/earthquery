@@ -13,7 +13,7 @@ import type { BasemapId, OverlayId, AdvancedToolId } from '../types/app';
 export const API_CONFIG = {
   /** Leave empty: the Vite proxy (dev) or reverse-proxy (prod) handles routing. */
   baseUrl: '',
-  timeoutMs: 120_000,  // 2 min — model inference can be slow on first load
+  timeoutMs: 300_000,  // 5 min — accommodates large raster uploads (e.g. 300MB S2 GeoTIFFs) + multi-model inference
   endpoints: {
     /* ── Backend-direct routes (FastAPI main.py legacy mounts) ── */
     health:          '/api/health',

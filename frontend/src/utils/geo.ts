@@ -122,7 +122,8 @@ export function inferTask(query: string, imageCount: number): TaskType {
   const q = query.toLowerCase();
   if (/(over time|temporal|trend|season|time series|timeline)/.test(q)) return 'temporal';
   if (/(chang|before|after|differ|compare)/.test(q)) return 'change-detection';
-  if (/(building|vehicle|ship|detect|find|count)/.test(q)) return 'object-detection';
+  if (/(what is|image type|what does it have|what.*contain|describe|explain|tell me about|analyze scene)/.test(q)) return 'scene-description';
+  if (/(building|vehicle|ship|detect|count|locate|where are|bounding box)/.test(q)) return 'object-detection';
   if (/(segment|land cover|classif)/.test(q)) return 'segmentation';
   if (/(fire|burn|hotspot|smoke)/.test(q)) return 'fire';
   if (/(water|flood|ocean|shore|river|lake)/.test(q)) return 'water';

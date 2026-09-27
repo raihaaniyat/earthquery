@@ -124,7 +124,7 @@ export interface AnalysisResponse {
   findings?: AnalysisFinding[];
   maskUrl?: string;
   model?: string;
-  validation?: 'passed' | 'failed' | 'skipped';
+  validation?: 'passed' | 'failed' | 'skipped' | string;
   metrics?: Record<string, string | number>;
   sections?: ScientificSections;
   decision_reason?: string;
@@ -199,6 +199,11 @@ export interface HistoryEntry {
   summary: string;
   aoi: Aoi | null;
   findings: AnalysisFinding[];
+  sections?: ScientificSections;
+  metrics?: Record<string, string | number>;
+  maskUrl?: string;
+  decisionReason?: string;
+  reportId?: string;
 }
 
 export interface ReportEntry {
