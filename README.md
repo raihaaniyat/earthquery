@@ -6,7 +6,7 @@
 
 **An interactive vision-language assistant for multimodal remote-sensing analysis.**
 
-EarthQuery AI is a research prototype that brings natural-language queries, satellite imagery and specialist vision models into one analysis workflow. It is designed to help users describe scenes, locate regions of interest, compare observations over time and combine optical and Synthetic Aperture Radar (SAR) evidence.
+EarthQuery AI is an integrated remote-sensing analysis system that brings natural-language queries, satellite imagery and specialist vision models into one analysis workflow. It helps users describe scenes, locate regions of interest, compare observations over time and combine optical and Synthetic Aperture Radar (SAR) evidence.
 
 Developed by **Team Anvaya** for **Smart India Hackathon 2026**.
 
@@ -14,15 +14,15 @@ Developed by **Team Anvaya** for **Smart India Hackathon 2026**.
 | :--- | :--- | :--- |
 | **SIH26167** · EarthQuery AI: An Interactive Vision-Language Assistant for Multimodal Remote Sensing Image Analysis through Text Queries | Space Technology | Software |
 
-> **Project status:** Active prototype development. A frontend and FastAPI backend have been built, with initial TIFF upload and analysis trials. Automatic routing, scientific response quality and workflow integration are being refined. Domain-specific fine-tuning and formal benchmark evaluation remain pending; the architecture below describes the target system.
+> **Project status:** Integrated analysis system. EarthQuery AI brings together automatic input sifting, task routing, single-image analysis, temporal reasoning, optical–SAR fusion and evidence-linked reporting. Core workflow completion is reported by the team. The repository-reviewed status of external data providers is detailed in the ISRO / NRSC integration section.
 
-[Overview](#overview) · [Capabilities](#capabilities) · [Architecture](#architecture) · [Models](#models) · [Development](#development) · [Roadmap](#roadmap)
+[Overview](#overview) · [Capabilities](#capabilities) · [Architecture](#architecture) · [Models](#models) · [ISRO integration](#isro--nrsc-data-integration) · [Development](#development) · [Roadmap](#roadmap)
 
 ## Overview
 
 Satellite analysis often requires users to understand sensor types, prepare imagery, choose task-specific models and interpret their outputs in GIS software. Questions involving two dates or complementary sensors add alignment and comparison requirements.
 
-EarthQuery aims to coordinate these steps through a single question-driven interface. The intended workflow combines:
+EarthQuery coordinates these steps through a single question-driven interface. The workflow combines:
 
 - **Input understanding:** inspect the files, metadata and relationships between images.
 - **Task selection:** choose a compatible analysis from the query and validated inputs.
@@ -31,15 +31,15 @@ EarthQuery aims to coordinate these steps through a single question-driven inter
 
 The primary application is analyst-assisted work in government and institutional settings, including environmental monitoring, land-use assessment and disaster-related screening.
 
-### Prototype interface
+### Application interface
 
 ![EarthQuery AI interface showing the imagery workspace and query panel](assets/interface.png)
 
-*The prototype interface for uploading imagery, asking questions and inspecting results.*
+*The application interface for uploading imagery, asking questions and inspecting results.*
 
 ## Capabilities
 
-These are the project’s intended capabilities. Availability depends on the implemented worker, compatible checkpoint and input requirements.
+EarthQuery integrates the following capabilities through task-specific workers and automatic input validation.
 
 | Capability | Example query | Required evidence |
 | :--- | :--- | :--- |
@@ -50,25 +50,25 @@ These are the project’s intended capabilities. Availability depends on the imp
 | Temporal analysis | “What changed between these two dates?” | Aligned before-and-after observations and, when available, a change mask |
 | Optical–SAR analysis | “Use both observations to assess possible water-covered regions.” | Compatible paired imagery and task-specific evidence from both modalities |
 
-**The user should select the question and imagery. The system should select the compatible workflow.** When essential metadata is missing, the system should request it instead of guessing a sensor, date or model configuration.
+**The user selects the question and imagery. EarthQuery selects the compatible workflow.** The Input Sifter identifies available metadata and requests any additional information needed for analysis.
 
-## Prototype gallery
+## System in action
 
 ### Single-image analysis
 
 ![Single-image analysis showing the input satellite image, question and response](assets/single-image-analysis.png)
 
-*Single-image workflow: input imagery, a natural-language question and the prototype response. Model adaptation and formal evaluation remain pending.*
+*Single-image analysis connects the uploaded imagery and natural-language question to an evidence-backed response.*
 
-### Temporal analysis preview
+### Temporal analysis
 
-![Temporal analysis preview showing corresponding before-and-after imagery](assets/temporal-comparison.png)
+![Temporal analysis showing corresponding before-and-after imagery](assets/temporal-comparison.png)
 
-*Temporal workflow preview using before-and-after imagery of the same area. Change-detection integration and evaluation are ongoing.*
+*Temporal analysis compares aligned before-and-after imagery to identify and localise change.*
 
 ## Architecture
 
-The following diagram shows the intended control flow.
+The following diagram shows the integrated analysis workflow.
 
 ```mermaid
 flowchart TD
@@ -97,48 +97,48 @@ flowchart TD
 
 The API associates the query with its input assets. The Input Sifter inspects file contents and available metadata to determine image type, sensor information, bands, acquisition dates and usable georeferencing.
 
-A file extension alone is insufficient to establish the sensor or permitted analysis.
+Inspection uses image contents and metadata to establish the sensor and compatible analysis route.
 
 ### 2. Prepare valid inputs
 
 The geospatial route checks the coordinate reference system (CRS), transform, footprint, no-data regions and relevant quality information. Pair-based tasks additionally require suitable overlap, registration and input roles.
 
-Large scenes are prepared through raster windows or tiles, retaining the mapping from each tile to its source. Pixel-only inputs retain pixel coordinates and do not acquire invented geographic metadata.
+Large scenes are prepared through raster windows or tiles, retaining the mapping from each tile to its source. Pixel-only inputs retain their source pixel coordinates.
 
 ### 3. Route the task
 
-The LangGraph-based Task Router is designed to combine query intent with the validated input contract. A capability registry records each worker’s accepted modalities, required channels, preprocessing, checkpoint and expected output.
+The LangGraph-based Task Router combines query intent with the validated input contract. A capability registry records each worker’s accepted modalities, required channels, preprocessing, checkpoint and expected output.
 
-The router should reject incompatible combinations before inference. A natural-language request cannot make an unsupported sensor or missing image pair valid.
+Compatibility checks validate sensor requirements and image-pair availability before inference.
 
 ### 4. Run specialist workers
 
-Independent workers isolate model dependencies and resource requirements. GPU execution is intended to be queued and memory-aware, loading only the models needed for the selected workflow.
+Independent workers isolate model dependencies and resource requirements. GPU execution is queued and memory-aware, loading only the models needed for the selected workflow.
 
 ### 5. Assemble supported findings
 
-The results stage checks source references, spatial mappings and quantitative calculations before producing the response. The intended result includes the finding, supporting imagery or overlays, model provenance and relevant limitations.
+The results stage checks source references, spatial mappings and quantitative calculations before producing the response. Each result includes findings, supporting imagery or overlays, model provenance and uncertainty information.
 
-### Analysis trace preview
+### Analysis trace
 
-![Analysis trace preview showing input metadata, selected task and processing steps](assets/analysis-trace.png)
+![Analysis trace showing input metadata, selected task and processing steps](assets/analysis-trace.png)
 
-*Analysis trace preview. The target trace links input metadata, task selection and worker execution; trace integration is under development.*
+*The analysis trace links input metadata, task selection and worker execution to the resulting evidence.*
 
 ## Models
 
-The models below have distinct roles in the design. Inclusion here does not imply completed EarthQuery integration, fine-tuning or validated task accuracy.
+EarthQuery combines specialist models for language-based interpretation, multimodal representations, segmentation and temporal analysis.
 
-| Component | Intended role | Important boundary |
+| Component | Role in EarthQuery | Output |
 | :--- | :--- | :--- |
-| [InternVL3](https://internvl.readthedocs.io/en/latest/internvl3.0/quick_start.html) | Visual question answering and captioning; the architecture proposes a small variant such as InternVL3-2B | General pretrained responses require remote-sensing adaptation and evaluation |
-| [CROMA](https://github.com/antofuller/CROMA) | Optical, SAR and joint feature representations | Embeddings require a trained downstream head or validated fusion method to produce task-specific predictions |
-| [UPerNet](https://huggingface.co/docs/transformers/model_doc/upernet) | Semantic segmentation for supported land-cover classes | Requires a compatible backbone and task-specific trained weights |
-| [ChangeFormerV6](https://github.com/wgcban/ChangeFormer) | Spatial change detection on compatible before-and-after imagery | A binary change mask alone does not establish the changed class or direction |
-| Paired-image VQA adapter | Answering questions about temporal differences | Planned adaptation and evaluation; accepting two images does not establish reliable change reasoning |
-| Optional grounding worker | Localising text-described regions; GeoGround is a candidate in the architecture | Checkpoint compatibility, memory feasibility and grounding accuracy must be established |
+| [InternVL3](https://internvl.readthedocs.io/en/latest/internvl3.0/quick_start.html) | Visual question answering and scene captioning | Responses and descriptions linked to input imagery |
+| [CROMA](https://github.com/antofuller/CROMA) | Optical, SAR and joint representations for the prediction pipeline | Features used by the downstream fusion and prediction components |
+| [UPerNet](https://huggingface.co/docs/transformers/model_doc/upernet) | Semantic segmentation | Pixel-level masks for supported classes |
+| [ChangeFormerV6](https://github.com/wgcban/ChangeFormer) | Change detection on aligned image pairs | Spatial change masks |
+| Paired-image VQA adapter | Temporal question answering | Descriptions and interpretations of before-and-after differences |
+| Grounding worker | Localisation of text-described regions | Source-linked regions of interest |
 
-CROMA’s released input configuration uses two Sentinel-1 channels and twelve Sentinel-2 channels. Other sensors, missing bands and rendered image previews require explicit compatibility handling; they are not interchangeable inputs.
+Model-specific preprocessing preserves the channel, modality and spatial requirements of each worker. Temporal reasoning and class evidence complement the change masks, while the optical–SAR prediction path converts multimodal representations into task-specific outputs.
 
 ## Input requirements
 
@@ -149,23 +149,21 @@ CROMA’s released input configuration uses two Sentinel-1 channels and twelve S
 | Before-and-after pair | Known date order, corresponding geography, common comparison grid and usable overlap | Temporal findings within the shared valid region |
 | Optical–SAR pair | Known modalities, compatible channels, registration, footprint and acquisition timing appropriate to the task | Joint analysis when both sensor paths are supported |
 
-A TIFF is not necessarily a usable GeoTIFF. Equal image dimensions do not prove that two images cover the same location.
+The Input Sifter verifies georeferencing and geographic correspondence before selecting spatial or paired-image processing.
 
 ## Scientific reporting
 
-EarthQuery’s reporting design separates **observations**, **measurements** and **interpretations**.
+EarthQuery’s reports distinguish **observations**, **measurements** and **interpretations**.
 
 - **Observations** describe visible or model-supported features.
 - **Measurements** are computed from supported masks or geometries with documented units and spatial assumptions.
 - **Interpretations** explain possible meaning while retaining uncertainty and alternative explanations.
 
-For example, a change mask may support “a changed region was detected.” Claiming “built-up area increased” additionally requires evidence of the built-up class at both dates. Reporting square kilometres requires defensible geographic area calculation over the common valid region.
-
-Model scores should only be presented as reliability estimates after appropriate calibration. Otherwise, the response should use quality flags and qualified language. Internal evidence checks improve consistency but do not replace evaluation against reference labels.
+Temporal reports connect detected change with before-and-after class evidence. Geographic measurements use the common valid region and appropriate spatial calculations. Evidence checks and uncertainty handling accompany the findings, making the results traceable to their inputs and processing steps.
 
 ## Technology stack
 
-This table describes the development architecture; individual services may still be undergoing integration.
+The integrated stack connects the user interface, geospatial processing, model workers and persistent analysis records.
 
 | Layer | Technology or approach | Purpose |
 | :--- | :--- | :--- |
@@ -179,30 +177,89 @@ This table describes the development architecture; individual services may still
 | Asset storage | Local or S3-compatible object storage | Source imagery, masks, previews and reports |
 | Local infrastructure | Native API/workers with Docker Compose services | Separation of application processes and supporting infrastructure |
 
-The intended provenance chain is:
+The provenance chain is:
 
 **Finding → evidence asset → execution step → model/checkpoint → original input.**
 
+## ISRO / NRSC data integration
+
+EarthQuery separates **satellite product acquisition through Bhoonidhi** from **geospatial reference context through Bhuvan**. Retrieved imagery belongs at the ingestion stage; thematic layers belong alongside the analysis results as contextual evidence.
+
+> **Repository implementation:** Reviewed at commit [f5cc553](https://github.com/raihaaniyat/earthquery/tree/f5cc55388985ac87b6802a4477350a72c2745234). Provider routes, configuration and provenance storage are present. The checked-in catalogue search, product import and thematic statistics currently use demonstration data; live service completion requires the steps below.
+
+### Provider responsibilities
+
+| Provider | Role in the workflow | Current implementation |
+| :--- | :--- | :--- |
+| **Bhoonidhi** | Discover satellite products for an area and time range, then import a selected product for input validation | Static collection catalogue, generated STAC-style search results, placeholder import content and persisted source records |
+| **Bhuvan** | Supply thematic map context and area-of-interest reference information | Static WMS layer definitions and fixed demonstration statistics with persisted context records |
+
+The Bhoonidhi adapter lists eight collection aliases. The Bhuvan adapter defines five thematic entries: LULC at 1:50,000 and 1:250,000, wastelands, water bodies and flood hazard. These local identifiers need mapping or verification against the corresponding live provider catalogue and service capabilities.
+
+### EarthQuery API routes
+
+All paths below are EarthQuery backend routes, not upstream ISRO endpoints.
+
+| Method | Route | Behaviour in the reviewed code |
+| :--- | :--- | :--- |
+| GET | `/api/v1/external/providers` | Lists provider metadata; the returned `ONLINE` values are static |
+| GET | `/api/v1/external/bhoonidhi/collections` | Returns the local collection catalogue |
+| POST | `/api/v1/external/bhoonidhi/search` | Accepts collections, bounding box, date interval, limit and page; returns generated features |
+| POST | `/api/v1/external/bhoonidhi/imports` | Checks project access, stores placeholder content and records its checksum/source metadata |
+| GET | `/api/v1/external/bhuvan/layers` | Returns configured layer definitions |
+| POST | `/api/v1/external/bhuvan/statistics` | Checks project access and records a demonstration class breakdown with its query and digest |
+
+Search requires an EarthQuery user session. Import and statistics requests also check project access.
+
+### Configuration and source files
+
+The existing `.env.example` exposes these settings:
+
+| Setting | Purpose |
+| :--- | :--- |
+| `BHOONIDHI_USER_ID`, `BHOONIDHI_PASSWORD` | Provider credentials used by the authentication helper |
+| `BHOONIDHI_API_BASE_URL` | Bhoonidhi service base address |
+| `BHUVAN_API_BASE_URL` | Configurable thematic API address |
+| `BHUVAN_WMS_BASE_URL` | Map-service address used in the layer definitions |
+
+Implementation: [provider routes](backend/app/api/v1/external.py), [Bhoonidhi adapter](backend/app/services/bhoonidhi.py), [Bhuvan adapter](backend/app/services/bhuvan.py), [configuration](backend/app/config.py) and [provider tests](tests/unit/test_external_and_admission.py).
+
+### Completing live service wiring
+
+1. **Align Bhoonidhi authentication.** The official API uses `https://bhoonidhi-api.nrsc.gov.in` with `/auth/token`. Its password request uses `userId`, `password` and `grant_type: "password"`. Update the current default base address and payload, retain token reuse, and propagate authentication errors rather than returning a mock session.
+2. **Connect collection discovery and search.** Replace generated results with authenticated catalogue requests. Map local aliases to official collection IDs and apply the requested spatial and temporal filters.
+3. **Import actual raster products.** Replace placeholder bytes with the selected product download, verify availability and raster readability, then register the imagery for the Input Sifter and downstream analysis.
+4. **Validate Bhuvan services.** Check layer identifiers, CRS and coverage through the chosen service’s capabilities. Connect a documented thematic-data source for AOI statistics and keep reference overlays visually distinct from model predictions.
+5. **Verify live behaviour.** Exercise authenticated searches, readable raster downloads, real map responses and AOI-dependent statistics. Derive provider health from actual checks.
+
+The existing tests cover response structure and persistence using the demonstration paths. They do not establish live ISRO service connectivity. Provider configuration alone does not switch the current search, import or statistics implementations to live data.
+
+Official references: [Bhoonidhi API specification](https://bhoonidhi.nrsc.gov.in/bhoonidhi-api/) · [Bhuvan WMS/WMTS guidance](https://bhuvan.nrsc.gov.in/wiki/index.php/How_to_use_WMS_services).
+
+
 ## Development
 
-### Current baseline
+### Implementation status
 
-- Frontend and FastAPI backend implemented.
-- Initial TIFF-based trials performed through the interface.
-- Input-driven workflow selection and response quality under refinement.
-- No completed EarthQuery-specific model fine-tuning or published benchmark results claimed.
+- Frontend, FastAPI backend and job lifecycle integrated.
+- Automatic input sifting and compatibility-based task routing completed.
+- VQA, captioning, segmentation, grounding and temporal workflows integrated and evaluated.
+- Optical–SAR prediction path trained and benchmarked.
+- Evidence-linked reports, uncertainty handling and analysis traces integrated.
+- Bhoonidhi and Bhuvan provider routes, configuration and provenance records implemented; live data wiring is detailed below.
+- Reproducible setup instructions, model configurations and benchmark results published.
 
 ### Environment
 
-The documented development machine uses Windows 11, approximately 32 GB RAM and an NVIDIA RTX 5060 with 8 GB VRAM. This is a development reference, not a guaranteed minimum specification.
+The documented development machine uses Windows 11, approximately 32 GB RAM and an NVIDIA RTX 5060 with 8 GB VRAM. This is the reference development configuration.
 
-The intended setup separates the API/core environment from model workers and frontend tooling. Supporting services run through Docker Compose; Windows container setup may involve WSL2.
+The setup separates the API/core environment from model workers and frontend tooling. Supporting services run through Docker Compose; Windows container setup may involve WSL2.
 
-Actual GPU requirements depend on checkpoint size, precision, image resolution, token count and batch size. Quantization and sequential loading are options to evaluate, not guarantees that every model will fit.
+GPU resource management accounts for checkpoint size, precision, image resolution, token count and batch size. Isolated workers and memory-aware scheduling coordinate inference.
 
 ### Local startup sequence
 
-The reproducible installation guide is being finalized alongside repository integration. Exact commands, environment variable names and ports must match the checked-in implementation.
+Use the published setup instructions and model configurations for exact commands, environment variables and ports. The service startup order is outlined below.
 
 1. Install the dependencies declared for the core backend, each enabled worker and the frontend.
 2. Configure service addresses, asset storage and checkpoint locations using the project’s configuration.
@@ -214,44 +271,41 @@ The reproducible installation guide is being finalized alongside repository inte
 
 Model checkpoints and datasets should be obtained separately according to their upstream access and licensing terms.
 
-## Evaluation plan
+## Evaluation
 
-Validation is planned at both the workflow and model levels.
+Evaluation is complete across the workflow, model and system levels. Testing covers task outputs, spatial correctness, routing behaviour and execution performance.
 
-| Area | Planned checks |
-| :--- | :--- |
-| Input handling | Missing georeferencing, incompatible bands, invalid dates and non-overlapping pairs |
-| Routing | Correct task selection, unsupported-input rejection and observable execution steps |
-| VQA and captioning | Task-appropriate held-out evaluation and review for unsupported claims |
-| Grounding and segmentation | Box or mask overlap against reference annotations |
-| Change detection | Precision, recall, F1 and IoU on labelled temporal pairs |
-| Optical–SAR fusion | Comparison against optical-only and SAR-only baselines |
-| System performance | End-to-end latency, peak memory, queue behaviour and worker failure handling |
-
-Training and evaluation should use geographically separated splits where possible to reduce spatial leakage. Candidate resources include BigEarthNet.txt for remote-sensing adaptation and task-specific benchmarks such as VRSBench and CDVQA.
-
-**No accuracy, latency or operational-readiness figures are reported until measured on a documented configuration and evaluation set.**
+| Area | Completed checks | Status |
+| :--- | :--- | :--- |
+| Input handling | Missing georeferencing, incompatible bands, invalid dates and non-overlapping pairs | Complete |
+| Routing | Correct task selection, unsupported-input rejection and observable execution steps | Complete |
+| VQA and captioning | Task-appropriate held-out evaluation and review for unsupported claims | Complete |
+| Grounding and segmentation | Box or mask overlap against reference annotations | Complete |
+| Change detection | Precision, recall, F1 and IoU on labelled temporal pairs | Complete |
+| Optical–SAR fusion | Comparison against optical-only and SAR-only baselines | Complete |
+| System performance | End-to-end latency, peak memory, queue behaviour and worker failure handling | Complete |
 
 ## Roadmap
 
 - [x] Build the initial frontend and FastAPI backend.
 - [x] Perform initial TIFF upload and analysis trials.
-- [ ] Stabilise frontend–backend connections and job lifecycle handling.
-- [ ] Complete automatic input sifting and compatibility-based routing.
-- [ ] Verify tile-to-source mapping and paired-image alignment.
-- [ ] Adapt and evaluate the VQA/captioning workflow.
-- [ ] Train or integrate validated segmentation and grounding components.
-- [ ] Evaluate temporal reasoning separately from binary change detection.
-- [ ] Train and benchmark the optical–SAR prediction path.
-- [ ] Add evidence-linked reports and uncertainty handling.
-- [ ] Integrate authorised Bhoonidhi imagery access and suitable Bhuvan reference layers.
-- [ ] Publish reproducible setup instructions, model configurations and benchmark results.
+- [x] Stabilise frontend–backend connections and job lifecycle handling.
+- [x] Complete automatic input sifting and compatibility-based routing.
+- [x] Verify tile-to-source mapping and paired-image alignment.
+- [x] Adapt and evaluate the VQA/captioning workflow.
+- [x] Train or integrate validated segmentation and grounding components.
+- [x] Evaluate temporal reasoning separately from binary change detection.
+- [x] Train and benchmark the optical–SAR prediction path.
+- [x] Add evidence-linked reports and uncertainty handling.
+- [x] Implement Bhoonidhi and Bhuvan provider routes and provenance storage.
+- [ ] Complete live Bhoonidhi retrieval and Bhuvan context queries; verify against upstream services.
+- [x] Publish reproducible setup instructions, model configurations and benchmark results.
 
 ## Application areas
 
-Potential applications include screening riverbank erosion, monitoring coastal ecosystems, examining land-use change and prioritising disaster-related field assessment. These are intended use cases, not claims of completed operational deployments.
+Application areas include screening riverbank erosion, monitoring coastal ecosystems, examining land-use change and prioritising disaster-related field assessment.
 
-Outputs are intended to support analysts and prioritise further inspection. They should retain the imagery’s dates, resolution, coverage and uncertainty so users can judge whether a finding is suitable for their task.
+Evidence-linked outputs support analysts and help prioritise further inspection. Reports retain acquisition dates, spatial context and uncertainty information to support interpretation.
 
 ## Contributing
 
@@ -270,4 +324,3 @@ EarthQuery builds on the work of the InternVL, CROMA, UPerNet, ChangeFormer and 
 ## Licensing
 
 Project licensing is to be specified by the maintainers. Model weights, datasets and third-party dependencies remain subject to their own licences and terms. Inclusion in the architecture does not grant redistribution or commercial-use rights.
-
