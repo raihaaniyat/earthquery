@@ -118,7 +118,7 @@ class ConversationEngine:
 
         # 2. Saved Fact Retrieval on existing results (e.g., "How many did you find?", "What was the total number?")
         is_followup_count = not has_new_files and (
-            ("how many" in q_lower and any(w in q_lower for w in ["did you", "were found", "originally", "detected"]))
+            "how many" in q_lower
             or any(phrase in q_lower for phrase in [
                 "what was the count",
                 "what was the total",

@@ -89,6 +89,12 @@ class ProcessSupervisor:
                 free_mib = mem["free_mib"]
                 needed_mib = settings.GPU_MIN_FREE_MIB + required_vram_mib
                 if free_mib < needed_mib:
+                    # Brief grace period for OS display driver to finalize VRAM reclamation from previous step
+                    time.sleep(0.5)
+                    mem = ProcessSupervisor.get_gpu_memory_status()
+                    free_mib = mem["free_mib"]
+
+                if free_mib < needed_mib:
                     logger.warning(
                         f"GPU Admission rejected: free VRAM ({free_mib} MiB) < required reserve + model demand ({needed_mib} MiB)"
                     )

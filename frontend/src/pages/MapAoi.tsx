@@ -12,8 +12,9 @@ import {
   MinimizeIcon,
   SearchIcon,
   CheckIcon,
-  XIcon } from
-'lucide-react';
+  XIcon,
+  LayersIcon
+} from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useSatelliteMap } from '../hooks/useSatelliteMap';
@@ -36,7 +37,18 @@ const TOOLS: {id: MapTool;label: string;icon: typeof SquareIcon;}[] = [
 
 export function MapAoi() {
   const { toast } = useApp();
-  const { imagery, updateImagery, aoi, setAoi, mapTool, setMapTool, startAnalysis, setQuery } = useWorkspace();
+  const {
+    imagery,
+    updateImagery,
+    aoi,
+    setAoi,
+    mapTool,
+    setMapTool,
+    startAnalysis,
+    setQuery,
+    latestMapAction,
+    setLatestMapAction
+  } = useWorkspace();
   const containerRef = useRef<HTMLDivElement>(null);
   const [scenes, setScenes] = useState<StacScene[]>([]);
   const [sceneState, setSceneState] = useState<RequestState<StacScene[]>>({ status: 'idle' });
@@ -189,6 +201,58 @@ export function MapAoi() {
         <div style={{ padding: 12 }}>
           <div className={`map${fullscreen ? ' is-fullscreen' : ''}`}>
             <div ref={containerRef} className="map-canvas" aria-label="Interactive satellite map" />
+            {latestMapAction && (
+              <div
+                className="map-analytical-overlay"
+                style={{
+                  position: 'absolute',
+                  top: 14,
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  zIndex: 600,
+                  background: 'rgba(15, 23, 42, 0.92)',
+                  backdropFilter: 'blur(10px)',
+                  border: '1px solid var(--accent)',
+                  borderRadius: '10px',
+                  padding: '8px 14px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  boxShadow: '0 6px 24px rgba(0, 0, 0, 0.4)',
+                  fontSize: '12px',
+                  color: 'var(--text)'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <LayersIcon size={14} color="var(--accent)" />
+                  <b>Analytical Layer:</b> {latestMapAction.operation || 'Result overlay'}
+                  {latestMapAction.findings_count !== undefined && (
+                    <span className="badge ok" style={{ marginLeft: '4px', fontSize: '11px', padding: '2px 6px' }}>
+                      {latestMapAction.findings_count} features
+                    </span>
+                  )}
+                </div>
+                {latestMapAction.mask_url && (
+                  <a
+                    href={latestMapAction.mask_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="btn small"
+                    style={{ padding: '2px 8px', fontSize: '11px' }}
+                  >
+                    View Mask Asset
+                  </a>
+                )}
+                <button
+                  className="btn small"
+                  style={{ padding: '2px 6px', fontSize: '11px' }}
+                  onClick={() => setLatestMapAction(null)}
+                  title="Dismiss analytical overlay"
+                >
+                  <XIcon size={11} />
+                </button>
+              </div>
+            )}
             <div className="map-label status">
               <span>{statusText}</span>
               {drawing &&

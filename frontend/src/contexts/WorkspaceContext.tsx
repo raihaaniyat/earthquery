@@ -62,10 +62,12 @@ interface WorkspaceValue {
   isConversationLoading: boolean;
   conversationError: string | null;
   latestMapAction: any | null;
+  setLatestMapAction: (action: any | null) => void;
   loadConversation: (id: string) => Promise<void>;
   sendFollowUp: (prompt: string, newFiles?: File[]) => Promise<void>;
   retryLastTurn: () => Promise<void>;
   deleteConversationById: (id: string) => Promise<void>;
+  newChat: () => void;
 }
 
 const WorkspaceContext = createContext<WorkspaceValue | null>(null);
@@ -278,7 +280,8 @@ export function WorkspaceProvider({ children }: {children: React.ReactNode;}) {
       // Snapshot immutable values
       const finalQuery = q || 'Analyze this satellite imagery.';
       const filesToSubmit = [...imgs];
-      const newConvId = conversationId || createId();
+      // Always generate a fresh conversation ID for a new analysis session
+      const newConvId = createId();
       const optimisticReqId = createId();
 
       // Clear composer drafts immediately so they don't linger
@@ -667,7 +670,20 @@ export function WorkspaceProvider({ children }: {children: React.ReactNode;}) {
     setChat(null);
     setConversationId(null);
     setConversationSnapshot(null);
+    setConversationError(null);
+    setLatestMapAction(null);
     navigate('home');
+  }, [navigate, setConversationId]);
+
+  const newChat = useCallback(() => {
+    setQuery('');
+    setAttachments([]);
+    setChat(null);
+    setConversationId(null);
+    setConversationSnapshot(null);
+    setConversationError(null);
+    setLatestMapAction(null);
+    navigate('chat');
   }, [navigate, setConversationId]);
 
   const setComparisonPair = useCallback((p: ComparisonPair, runDiff = false) => {
@@ -729,17 +745,20 @@ export function WorkspaceProvider({ children }: {children: React.ReactNode;}) {
       isConversationLoading,
       conversationError,
       latestMapAction,
+      setLatestMapAction,
       loadConversation,
       sendFollowUp,
       retryLastTurn,
-      deleteConversationById
+      deleteConversationById,
+      newChat
     }),
     [
       query, attachments, addFiles, removeAttachment, aoi, imagery, updateImagery, mapTool, activeTool, chat,
       startAnalysis, rerunChat, newAnalysis, comparisonPair, setComparisonPair, pendingDiff, temporalImages,
       addTemporalFiles, removeTemporalImage, buildRequest, history, logHistory, logResult, setHistory, reports,
       createReport, setReports, conversationId, conversationSnapshot, isConversationLoading, conversationError,
-      latestMapAction, loadConversation, sendFollowUp, retryLastTurn, deleteConversationById
+      latestMapAction, setLatestMapAction, loadConversation, sendFollowUp, retryLastTurn, deleteConversationById,
+      newChat
     ]
   );
 

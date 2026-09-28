@@ -11,6 +11,8 @@ import os
 import re
 import json
 import uuid
+import time
+import shutil
 import asyncio
 import logging
 from datetime import datetime, timezone
@@ -146,71 +148,77 @@ async def poll_job_or_format(
         if job_id:
             try:
                 from rq.job import Job
+                from rq import Worker
                 redis_conn = get_redis_connection()
-                steps = int(timeout_seconds / 0.5)
-                for _ in range(steps):
-                    await asyncio.sleep(0.5)
-                    try:
-                        job = Job.fetch(job_id, connection=redis_conn)
-                        if job.is_finished:
-                            exec_result = job.result
-                            if isinstance(exec_result, dict):
-                                meta = exec_result.get("output_metadata", {})
-                                response["summary"] = (
-                                    exec_result.get("summary") or
-                                    meta.get("answer") or
-                                    meta.get("summary") or
-                                    exec_result.get("answer") or
-                                    str(meta or exec_result)
-                                )
-                                if exec_result.get("findings"):
-                                    response["findings"] = exec_result["findings"]
-                                else:
-                                    if "predictions" in meta:
-                                        for pred in meta.get("predictions", []):
-                                            response["findings"].append({
-                                                "label": pred.get("label", "Detection"),
-                                                "detail": f"Score: {pred.get('score', 'N/A')}",
-                                                "confidence": pred.get("score")
-                                            })
-                                    if "classes" in meta:
-                                        for cls_name, cls_val in meta.get("classes", {}).items():
-                                            response["findings"].append({
-                                                "label": cls_name,
-                                                "detail": f"Probability: {cls_val}",
-                                            })
+                active_workers = Worker.all(connection=redis_conn)
+                if not active_workers:
+                    logger.info("No active RQ workers registered on Redis queue. Executing local fallback immediately without delay.")
+                else:
+                    poll_limit = min(timeout_seconds, 6.0)
+                    steps = int(poll_limit / 0.25)
+                    for _ in range(steps):
+                        await asyncio.sleep(0.25)
+                        try:
+                            job = Job.fetch(job_id, connection=redis_conn)
+                            if job.is_finished:
+                                exec_result = job.result
+                                if isinstance(exec_result, dict):
+                                    meta = exec_result.get("output_metadata", {})
+                                    response["summary"] = (
+                                        exec_result.get("summary") or
+                                        meta.get("answer") or
+                                        meta.get("summary") or
+                                        exec_result.get("answer") or
+                                        str(meta or exec_result)
+                                    )
+                                    if exec_result.get("findings"):
+                                        response["findings"] = exec_result["findings"]
+                                    else:
+                                        if "predictions" in meta:
+                                            for pred in meta.get("predictions", []):
+                                                response["findings"].append({
+                                                    "label": pred.get("label", "Detection"),
+                                                    "detail": f"Score: {pred.get('score', 'N/A')}",
+                                                    "confidence": pred.get("score")
+                                                })
+                                        if "classes" in meta:
+                                            for cls_name, cls_val in meta.get("classes", {}).items():
+                                                response["findings"].append({
+                                                    "label": cls_name,
+                                                    "detail": f"Probability: {cls_val}",
+                                                })
 
-                                if exec_result.get("sections"):
-                                    response["sections"] = exec_result["sections"]
+                                    if exec_result.get("sections"):
+                                        response["sections"] = exec_result["sections"]
 
-                                if exec_result.get("participating_models"):
-                                    response["model"] = " + ".join(exec_result["participating_models"])
+                                    if exec_result.get("participating_models"):
+                                        response["model"] = " + ".join(exec_result["participating_models"])
 
-                                metrics_data = exec_result.get("metrics") or {}
-                                if hasattr(metrics_data, "model_dump"):
-                                    metrics_data = metrics_data.model_dump()
-                                elif not isinstance(metrics_data, dict):
-                                    metrics_data = {"status": "completed"}
-                                metrics_data["status"] = "completed"
-                                response["metrics"] = metrics_data
+                                    metrics_data = exec_result.get("metrics") or {}
+                                    if hasattr(metrics_data, "model_dump"):
+                                        metrics_data = metrics_data.model_dump()
+                                    elif not isinstance(metrics_data, dict):
+                                        metrics_data = {"status": "completed"}
+                                    metrics_data["status"] = "completed"
+                                    response["metrics"] = metrics_data
 
-                                current_task = str((fallback_params or {}).get("task") or result.get("task") or "")
-                                assets = exec_result.get("output_assets", {})
-                                if "change_mask" in assets:
-                                    mask_rel = Path(assets["change_mask"]).name
-                                    response["maskUrl"] = f"/api/assets/{mask_rel}"
-                                elif "grounding_overlay" in assets:
-                                    mask_rel = Path(assets["grounding_overlay"]).name
-                                    response["maskUrl"] = f"/api/assets/{mask_rel}"
-                                elif "segmentation_mask" in assets and current_task.lower() in ("segmentation", "landcover", "land_cover", "classification"):
-                                    mask_rel = Path(assets["segmentation_mask"]).name
-                                    response["maskUrl"] = f"/api/assets/{mask_rel}"
-                            break
-                        elif job.is_failed:
-                            logger.warning(f"Worker job {job_id} reported failure: {job.exc_info}. Executing direct fallback.")
-                            break
-                    except Exception:
-                        pass
+                                    current_task = str((fallback_params or {}).get("task") or result.get("task") or "")
+                                    assets = exec_result.get("output_assets", {})
+                                    if "change_mask" in assets:
+                                        mask_rel = Path(assets["change_mask"]).name
+                                        response["maskUrl"] = f"/api/assets/{mask_rel}"
+                                    elif "grounding_overlay" in assets:
+                                        mask_rel = Path(assets["grounding_overlay"]).name
+                                        response["maskUrl"] = f"/api/assets/{mask_rel}"
+                                    elif "segmentation_mask" in assets and current_task.lower() in ("segmentation", "landcover", "land_cover", "classification"):
+                                        mask_rel = Path(assets["segmentation_mask"]).name
+                                        response["maskUrl"] = f"/api/assets/{mask_rel}"
+                                break
+                            elif job.is_failed:
+                                logger.warning(f"Worker job {job_id} reported failure: {job.exc_info}. Executing direct fallback.")
+                                break
+                        except Exception:
+                            pass
             except Exception:
                 pass
 
@@ -600,27 +608,97 @@ def get_system_status():
     }
 
 
+def generate_raster_preview(tif_path: str) -> Optional[str]:
+    """Generates an 8-bit RGB normalized PNG preview for multi-band or floating-point GeoTIFFs."""
+    thumb_dir = os.path.join(SCRATCH_DIR, "thumbs")
+    os.makedirs(thumb_dir, exist_ok=True)
+    thumb_path = os.path.join(thumb_dir, f"{Path(tif_path).name}.png")
+    if os.path.isfile(thumb_path) and os.path.getsize(thumb_path) > 0:
+        return thumb_path
+
+    try:
+        import rasterio
+        from PIL import Image
+        import numpy as np
+        with rasterio.open(tif_path) as src:
+            count = src.count
+            if count >= 3:
+                arr = src.read([1, 2, 3])
+                arr = np.transpose(arr, (1, 2, 0))
+            else:
+                arr = src.read(1)
+
+            if arr.dtype != np.uint8:
+                valid = arr[np.isfinite(arr)]
+                if len(valid) > 0:
+                    p2, p98 = np.percentile(valid, (2, 98))
+                    if p98 > p2:
+                        arr = np.clip((arr - p2) / (p98 - p2) * 255.0, 0, 255).astype(np.uint8)
+                    else:
+                        arr = np.zeros_like(arr, dtype=np.uint8)
+                else:
+                    arr = np.zeros_like(arr, dtype=np.uint8)
+
+            img = Image.fromarray(arr)
+            img.thumbnail((800, 800), Image.Resampling.LANCZOS)
+            img.save(thumb_path, format="PNG")
+            return thumb_path
+    except Exception as e:
+        logger.warning(f"Could not generate raster thumbnail for {tif_path}: {e}")
+        return None
+
+
+def cleanup_old_scratch_files(max_age_hours: int = 24) -> None:
+    """Evicts scratch directories older than max_age_hours to prevent unbounded disk growth."""
+    try:
+        now = time.time()
+        cutoff = now - (max_age_hours * 3600)
+        scratch_p = Path(SCRATCH_DIR)
+        if not scratch_p.exists():
+            return
+        for item in scratch_p.iterdir():
+            if item.name == "thumbs":
+                continue
+            if item.is_dir():
+                mtime = item.stat().st_mtime
+                if mtime < cutoff:
+                    shutil.rmtree(item, ignore_errors=True)
+    except Exception as e:
+        logger.debug(f"Scratch cleanup skipped: {e}")
+
+
 # ----- Output Asset Serving -----
 
 @router.get("/assets/{file_path:path}")
-def get_asset_file(file_path: str):
+def get_asset_file(file_path: str, preview: Optional[bool] = None, raw: Optional[bool] = None):
     """
     Serves generated output masks or images from the storage scratch or uploads directory.
+    Automatically generates 8-bit PNG previews for GeoTIFFs so browsers can render thumbnails natively.
     """
-    # Check scratch dir recursively
+    found_candidate = None
     for candidate in [
         os.path.join(SCRATCH_DIR, file_path),
         os.path.join(UPLOAD_DIR, file_path)
     ]:
         if os.path.isfile(candidate):
-            return FileResponse(candidate)
+            found_candidate = candidate
+            break
 
-    # Search in subdirectories of scratch
-    matches = list(Path(SCRATCH_DIR).glob(f"**/{file_path}"))
-    if matches and matches[0].is_file():
-        return FileResponse(str(matches[0]))
+    if not found_candidate:
+        matches = list(Path(SCRATCH_DIR).glob(f"**/{file_path}"))
+        if matches and matches[0].is_file():
+            found_candidate = str(matches[0])
 
-    raise HTTPException(status_code=404, detail="Asset not found")
+    if not found_candidate:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    is_tif = found_candidate.lower().endswith((".tif", ".tiff"))
+    if is_tif and not raw:
+        preview_png = generate_raster_preview(found_candidate)
+        if preview_png and os.path.isfile(preview_png):
+            return FileResponse(preview_png, media_type="image/png")
+
+    return FileResponse(found_candidate)
 
 
 # =============================================================

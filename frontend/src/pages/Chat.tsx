@@ -11,16 +11,19 @@ import {
   AlertTriangleIcon,
   SparklesIcon,
   CheckCircle2Icon,
-  LayersIcon
+  LayersIcon,
+  Trash2Icon,
+  ClockIcon
 } from 'lucide-react';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { useApp } from '../contexts/AppContext';
 import { ChatConfigCard } from '../components/chat/ChatConfigCard';
 import { ChatResult } from '../components/chat/ChatResult';
 import { AnalysisResult } from '../components/AnalysisResult';
-import type { AttachedImage } from '../types/app';
+import type { AttachedImage, ConversationItem } from '../types/app';
 import { TASK_LABELS, describeAoi } from '../utils/geo';
 import { formatBytes } from '../utils/files';
+import { api } from '../utils/api';
 
 function getDynamicSuggestions(
   snapshot: any,
@@ -80,6 +83,7 @@ export function Chat() {
     chat,
     rerunChat,
     newAnalysis,
+    newChat,
     conversationId,
     conversationSnapshot,
     isConversationLoading,
@@ -87,13 +91,46 @@ export function Chat() {
     sendFollowUp,
     retryLastTurn,
     startAnalysis,
+    loadConversation,
+    deleteConversationById,
     attachments: workspaceAttachments
   } = useWorkspace();
 
   const [inputPrompt, setInputPrompt] = useState('');
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [showSessions, setShowSessions] = useState(false);
+  const [sessionsList, setSessionsList] = useState<ConversationItem[]>([]);
+  const [loadingSessions, setLoadingSessions] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const threadEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-resize composer textarea smoothly
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${Math.min(Math.max(textareaRef.current.scrollHeight, 44), 160)}px`;
+    }
+  }, [inputPrompt]);
+
+  const refreshSessions = async () => {
+    setLoadingSessions(true);
+    try {
+      const res = await api.listConversations();
+      if (res.status === 'success') {
+        setSessionsList(res.data);
+      }
+    } catch {
+      // Ignored if offline
+    } finally {
+      setLoadingSessions(false);
+    }
+  };
+
+  useEffect(() => {
+    void refreshSessions();
+  }, [conversationId]);
 
   // Auto-scroll to bottom on new messages or loading updates
   useEffect(() => {
@@ -158,10 +195,112 @@ export function Chat() {
               <p>Persistent multi-turn satellite analysis workspace</p>
             </div>
           </div>
-          <button className="btn" onClick={newAnalysis} id="btn-new-analysis">
-            <PlusIcon size={14} /> New analysis
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              className={`btn ${showSessions ? 'primary' : ''}`}
+              onClick={() => {
+                setShowSessions((prev) => !prev);
+                if (!showSessions) void refreshSessions();
+              }}
+              title="Switch or manage past chat sessions"
+              id="btn-chat-sessions"
+            >
+              <MessageSquareIcon size={14} /> Sessions {sessionsList.length > 0 && `(${sessionsList.length})`}
+            </button>
+            <button className="btn primary" onClick={newChat} id="btn-new-chat" title="Start a fresh isolated analysis chat">
+              <PlusIcon size={14} /> New chat
+            </button>
+          </div>
         </div>
+
+        {/* Floating Sessions Drawer */}
+        {showSessions && (
+          <div
+            className="panel sessions-drawer"
+            style={{
+              marginBottom: '16px',
+              padding: '16px',
+              background: 'var(--surface-2)',
+              border: '1px solid var(--line-strong)',
+              borderRadius: '12px'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+              <div style={{ fontWeight: 600, fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <ClockIcon size={14} color="var(--accent)" /> Saved Conversations ({sessionsList.length})
+              </div>
+              <button
+                className="btn small"
+                onClick={() => setShowSessions(false)}
+                style={{ padding: '2px 8px', fontSize: '12px' }}
+              >
+                Close
+              </button>
+            </div>
+            {sessionsList.length === 0 ? (
+              <div style={{ color: 'var(--muted)', fontSize: '13px', textAlign: 'center', padding: '12px' }}>
+                {loadingSessions ? 'Loading saved sessions…' : 'No saved conversations yet. Start a new chat to begin.'}
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '240px', overflowY: 'auto' }}>
+                {sessionsList.map((s) => {
+                  const isCurrent = s.id === conversationId;
+                  return (
+                    <div
+                      key={s.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '8px 12px',
+                        borderRadius: '8px',
+                        background: isCurrent ? 'var(--accent-soft)' : 'var(--surface-3)',
+                        border: isCurrent ? '1px solid var(--accent)' : '1px solid var(--line)'
+                      }}
+                    >
+                      <button
+                        onClick={() => {
+                          void loadConversation(s.id);
+                          setShowSessions(false);
+                        }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: isCurrent ? 'var(--accent-ink)' : 'var(--text)',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          flex: 1,
+                          fontWeight: isCurrent ? 600 : 'normal',
+                          fontSize: '13px',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap'
+                        }}
+                      >
+                        {s.title}
+                        <span style={{ fontSize: '11px', color: 'var(--muted)', marginLeft: '8px' }}>
+                          ({s.message_count} msgs · {s.updated_at ? new Date(s.updated_at).toLocaleDateString() : 'recent'})
+                        </span>
+                      </button>
+                      <button
+                        className="btn small"
+                        style={{ padding: '2px 6px', background: 'none', border: 'none', color: 'var(--muted)' }}
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          await deleteConversationById(s.id);
+                          setSessionsList((prev) => prev.filter((x) => x.id !== s.id));
+                        }}
+                        title="Delete conversation"
+                      >
+                        <Trash2Icon size={12} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Empty State when no conversation is active */}
         {!hasMessages && !chat ? (
@@ -276,8 +415,8 @@ export function Chat() {
                   : (conversationSnapshot?.datasets || []).map((d) => ({
                       id: d.id,
                       name: d.file_name,
-                      url: `/api/assets/${d.file_name}`,
-                      previewable: !d.file_name.toLowerCase().endsWith('.tif') && !d.file_name.toLowerCase().endsWith('.tiff'),
+                      url: `/api/assets/${d.file_name}?preview=true`,
+                      previewable: true,
                       size: d.file_size,
                       type: d.mime_type || 'image/jpeg',
                       width: 0,
@@ -551,6 +690,7 @@ export function Chat() {
             </button>
 
             <textarea
+              ref={textareaRef}
               className="composer-textarea"
               disabled={isConversationLoading}
               placeholder={
