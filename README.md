@@ -16,7 +16,7 @@ Developed by **Team Anvaya** for **Smart India Hackathon 2026**.
 
 > **Project status:** Integrated analysis system. EarthQuery AI brings together automatic input sifting, task routing, single-image analysis, temporal reasoning, optical–SAR fusion and evidence-linked reporting. Core workflow completion is reported by the team. The repository-reviewed status of external data providers is detailed in the ISRO / NRSC integration section.
 
-[Overview](#overview) · [Capabilities](#capabilities) · [Architecture](#architecture) · [Models](#models) · [ISRO integration](#isro--nrsc-data-integration) · [Development](#development) · [Roadmap](#roadmap)
+[Overview](#overview) · [Capabilities](#capabilities) · [Architecture](#architecture) · [Models](#models) · [ISRO integration](#isro--nrsc-data-integration) · [Technical implementation](#technical-implementation) · [Development](#development) · [Roadmap](#roadmap)
 
 ## Overview
 
@@ -51,6 +51,18 @@ EarthQuery integrates the following capabilities through task-specific workers a
 | Optical–SAR analysis | “Use both observations to assess possible water-covered regions.” | Compatible paired imagery and task-specific evidence from both modalities |
 
 **The user selects the question and imagery. EarthQuery selects the compatible workflow.** The Input Sifter identifies available metadata and requests any additional information needed for analysis.
+
+## GeoTIFF map localisation
+
+Upload a georeferenced TIFF to locate the imagery on the map at its recorded geographic position. This connects the uploaded scene with its real-world location and makes spatial context available before analysis.
+
+**Availability:** Implemented in the local build; the feature is not yet committed to the public repository.
+
+Placement uses the raster’s georeferencing. Its positional accuracy follows the source data; a TIFF without usable geographic metadata needs that information before automatic map localisation is possible.
+
+![Uploaded GeoTIFF located on the EarthQuery map](assets/geotiff-map-localisation.png)
+
+*An uploaded GeoTIFF located on the map in the local build.*
 
 ## System in action
 
@@ -136,7 +148,7 @@ EarthQuery combines specialist models for language-based interpretation, multimo
 | [UPerNet](https://huggingface.co/docs/transformers/model_doc/upernet) | Semantic segmentation | Pixel-level masks for supported classes |
 | [ChangeFormerV6](https://github.com/wgcban/ChangeFormer) | Change detection on aligned image pairs | Spatial change masks |
 | Paired-image VQA adapter | Temporal question answering | Descriptions and interpretations of before-and-after differences |
-| Grounding worker | Localisation of text-described regions | Source-linked regions of interest |
+| OWLv2 grounding worker | Localisation of text-described regions; registered internally as `geoground` | Source-linked regions of interest |
 
 Model-specific preprocessing preserves the channel, modality and spatial requirements of each worker. Temporal reasoning and class evidence complement the change masks, while the optical–SAR prediction path converts multimodal representations into task-specific outputs.
 
@@ -167,13 +179,13 @@ The integrated stack connects the user interface, geospatial processing, model w
 
 | Layer | Technology or approach | Purpose |
 | :--- | :--- | :--- |
-| User interface | Web-based GIS and query interface | Upload imagery, submit questions and inspect results |
+| User interface | React, TypeScript, Vite, Tailwind CSS and Leaflet | Upload imagery, submit questions and inspect results |
 | API | FastAPI and Pydantic | Request handling, validation and structured responses |
 | Orchestration | LangGraph and a capability registry | Controlled task selection and execution |
 | Raster processing | GDAL and Rasterio | Metadata inspection, windowed reads and spatial preparation |
 | Model inference | PyTorch and isolated workers | Specialist inference and model-specific dependencies |
 | Persistent records | PostgreSQL; PostGIS for spatial records | Jobs, scene metadata, footprints and evidence relationships |
-| Queue | Redis-based job dispatch | Background processing |
+| Queue | Redis and RQ | Background processing |
 | Asset storage | Local or S3-compatible object storage | Source imagery, masks, previews and reports |
 | Local infrastructure | Native API/workers with Docker Compose services | Separation of application processes and supporting infrastructure |
 
@@ -235,6 +247,63 @@ Implementation: [provider routes](backend/app/api/v1/external.py), [Bhoonidhi ad
 The existing tests cover response structure and persistence using the demonstration paths. They do not establish live ISRO service connectivity. Provider configuration alone does not switch the current search, import or statistics implementations to live data.
 
 Official references: [Bhoonidhi API specification](https://bhoonidhi.nrsc.gov.in/bhoonidhi-api/) · [Bhuvan WMS/WMTS guidance](https://bhuvan.nrsc.gov.in/wiki/index.php/How_to_use_WMS_services).
+
+
+## Technical implementation
+
+### Frontend and API connectivity
+
+The frontend uses **React, TypeScript, Vite, Tailwind CSS and Leaflet**. In development, Vite runs on port **3000** and proxies `/api/*` and `/health/*` requests to FastAPI at **127.0.0.1:8000**. Browser requests use relative URLs through [API configuration](frontend/src/data/apiConfig.ts); the proxy is defined in [vite.config.ts](frontend/vite.config.ts).
+
+| Address | Purpose |
+| :--- | :--- |
+| `http://localhost:3000` | Frontend development server |
+| `http://127.0.0.1:8000/docs` | Interactive API documentation |
+| `http://127.0.0.1:8000/health/live` | API liveness |
+| `http://127.0.0.1:8000/health/ready` | Database-based readiness with dependency details |
+| `http://127.0.0.1:8000/api/v1/capabilities` | Capability information |
+
+Production hosting needs an equivalent reverse-proxy configuration; Vite's development proxy is local development tooling.
+
+### Background jobs and GPU execution
+
+The job service implements persistent status records, idempotency handling, worker leases and heartbeats. Outbox events dispatch work to Redis/RQ queues. The recovery service handles expired leases and orphaned staging assets.
+
+The analysis-job API supports submission, status polling, event retrieval, cancellation and retry through `/api/v1/analysis-jobs`. The runtime supervisor uses a cross-process file lock to serialize GPU steps and checks available VRAM against the configured reserve and model demand.
+
+Source: [job service](backend/app/services/jobs.py) · [outbox](backend/app/services/outbox.py) · [recovery](backend/app/services/recovery.py) · [GPU supervisor](backend/runtime/supervisor.py).
+
+### Model and input contracts
+
+[config/models.yaml](config/models.yaml) records model identifiers, checkpoint locations, execution environments, devices, memory estimates, accepted inputs and output contracts. [config/pairing_policies.yaml](config/pairing_policies.yaml) declares temporal and optical–SAR pairing thresholds and sensor requirements.
+
+The reviewed registry configures InternVL3-2B, CROMA-Base, ChangeFormerV6 and UPerNet ConvNeXt-Tiny. Its `geoground` entry points to an **OWLv2** checkpoint, so the internal identifier should not be interpreted as the GeoGround research model. Registry verification labels describe the checked-in configuration; record task benchmark results separately from model load checks.
+
+### Raster measurements and evidence
+
+The [raster measurement service](backend/app/services/raster_measurements.py) contains metadata extraction, spectral-index calculations and temporal raster-difference routines. Its response formatter separates:
+
+- **Measured from raster:** metadata and calculated measurements.
+- **Model candidate:** the model's observations.
+- **Interpretation requiring review:** contextual interpretation and uncertainty.
+
+This structure helps users distinguish computed quantities from generated descriptions. Applicable measurements depend on the raster's bands, spatial reference and preprocessing.
+
+### Repository navigation
+
+| Path | Contents |
+| :--- | :--- |
+| `backend/app/api/v1/` | Projects, scenes, pairs, jobs, findings, assets, reports and provider routes |
+| `backend/app/services/` | Ingestion, routing, pairing, evidence, storage and provider logic |
+| `backend/runtime/` | Isolated execution and GPU supervision |
+| `frontend/src/` | Interface pages, map hooks, analysis cards and API utilities |
+| `config/` | Model contracts and pairing policies |
+| `docker/docker-compose.yml` | Supporting service configuration |
+| `scripts/` | Startup, diagnostics, model checks, training and backup utilities |
+| `tests/` | Unit and integration checks |
+| `docs/` | Implementation, verification and audit records |
+
+The Windows startup script is [scripts/start_backend.ps1](scripts/start_backend.ps1); it currently contains machine-specific Conda paths that must match the local installation. Frontend package scripts provide `npm run dev`, `npm run build` and `npm run lint`. These are repository-defined commands, not a claim that they were executed during this documentation review.
 
 
 ## Development
