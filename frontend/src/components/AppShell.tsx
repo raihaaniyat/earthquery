@@ -6,6 +6,7 @@ import { ModelDrawer } from './ModelDrawer';
 import { Toast } from './Toast';
 import { Home } from '../pages/Home';
 import { Chat } from '../pages/Chat';
+import { GeoTiffWorkspace } from '../pages/GeoTiffWorkspace';
 import { Imagery } from '../pages/Imagery';
 import { Advanced } from '../pages/Advanced';
 import { Temporal } from '../pages/Temporal';
@@ -18,6 +19,7 @@ import type { PageId } from '../types/app';
 const PAGES: Record<PageId, () => JSX.Element> = {
   home: Home,
   chat: Chat,
+  geotiff: GeoTiffWorkspace,
   analyze: Imagery,
   advanced: Advanced,
   temporal: Temporal,

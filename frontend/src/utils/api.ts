@@ -10,7 +10,10 @@ import type {
   ModelId,
   SearchRequest,
   StacGeometry,
-  StacScene } from
+  StacScene,
+  ConversationItem,
+  ConversationSnapshot,
+  ConversationTurnResponse } from
 '../types/app';
 
 type Body = Record<string, unknown> | FormData;
@@ -46,7 +49,7 @@ async function readError(res: Response, fallback: string): Promise<string> {
   return fallback;
 }
 
-export async function fetchJson<T>(url: string, body?: Body, method: 'GET' | 'POST' = 'POST'): Promise<ApiResult<T>> {
+export async function fetchJson<T>(url: string, body?: Body, method: 'GET' | 'POST' | 'DELETE' = 'POST'): Promise<ApiResult<T>> {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
     return { status: 'network', message: 'You appear to be offline. Check your connection and try again.' };
   }
@@ -96,7 +99,7 @@ function withFiles(payload: object, files: File[]): Body {
 }
 
 /* ── Map frontend ModelId → backend model id ── */
-const MODEL_MAP: Record<string, string> = {
+export const MODEL_MAP: Record<string, string> = {
   'Auto': '',
   'InternVL3': 'internvl3',
   'GeoGround': 'geoground',
@@ -110,7 +113,7 @@ const MODEL_MAP: Record<string, string> = {
 };
 
 /* ── Map frontend TaskType → backend task key for /api/dispatch ── */
-const TASK_MAP: Record<string, string> = {
+export const TASK_MAP: Record<string, string> = {
   'change-detection': 'change_detection',
   'temporal': 'change_detection',
   'object-detection': 'visual_grounding',
@@ -181,6 +184,32 @@ export const api = {
   analysis:        (p: AnalysisRequest, files: File[] = []) => submitAnalysis(p, files),
   changeDetection: (p: AnalysisRequest, files: File[] = []) => submitAnalysis({ ...p, task: 'change-detection' }, files),
   prediction:      (p: AnalysisRequest, files: File[] = []) => submitAnalysis(p, files),
+  listConversations: () => fetchJson<ConversationItem[]>(E.conversations, undefined, 'GET'),
+  createConversation: (title?: string, id?: string) => fetchJson<ConversationSnapshot>(E.conversations, { title, conversation_id: id }, 'POST'),
+  getConversationSnapshot: (conversationId: string) => fetchJson<ConversationSnapshot>(`${E.conversations}/${encodeURIComponent(conversationId)}`, undefined, 'GET'),
+  deleteConversation: (conversationId: string) => fetchJson<{ deleted: boolean }>(`${E.conversations}/${encodeURIComponent(conversationId)}`, undefined, 'DELETE'),
+  sendConversationMessage: (
+    conversationId: string,
+    data: {
+      prompt: string;
+      client_request_id?: string;
+      task?: string;
+      model?: string;
+    },
+    files?: File[]
+  ) => {
+    const url = `${E.conversations}/${encodeURIComponent(conversationId)}/messages`;
+    if (files && files.length > 0) {
+      const fd = new FormData();
+      fd.append('prompt', data.prompt);
+      if (data.client_request_id) fd.append('client_request_id', data.client_request_id);
+      if (data.task) fd.append('task', data.task);
+      if (data.model) fd.append('model', data.model);
+      files.forEach((f) => fd.append('files', f, f.name));
+      return fetchJson<ConversationTurnResponse>(url, fd, 'POST');
+    }
+    return fetchJson<ConversationTurnResponse>(url, data, 'POST');
+  },
 };
 
 interface RawStacItem {

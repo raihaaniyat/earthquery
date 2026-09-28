@@ -30,6 +30,9 @@ export const API_CONFIG = {
     changeDetection: '/api/change-detection',
     prediction:      '/api/prediction',
 
+    /* ── Conversational multi-turn API ── */
+    conversations:   '/api/conversations',
+
     /* ── V1 structured API ── */
     v1Capabilities:  '/api/v1/capabilities',
     v1Projects:      '/api/v1/projects',

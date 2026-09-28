@@ -7,8 +7,11 @@ Deterministic Task Router -> Model/Raster Processing -> Evidence Validator.
 
 import os
 import json
+import logging
 from typing import TypedDict, List, Optional, Dict, Any
 from langgraph.graph import StateGraph, END
+
+logger = logging.getLogger("satquery.router")
 
 from backend.app.models_registry import REGISTRY, ModelStatus
 from backend.app.input_validator import validate_geotiff, validate_benchmark_image
@@ -44,9 +47,12 @@ from backend.app.tasks.inference_tasks import (
     execute_pipeline_task
 )
 from backend.app.services.multi_model_pipeline import run_multi_model_pipeline
+from backend.app.db.session import SessionLocal
+from backend.app.db.models import Conversation, ConversationResult, ConversationDataset
+from backend.app.services.conversation_service import ConversationEngine
 
 
-class RouterState(TypedDict):
+class RouterState(TypedDict, total=False):
     task: str
     input_category: str  # "geotiff" or "benchmark"
     file_paths: List[str]
@@ -62,6 +68,16 @@ class RouterState(TypedDict):
     dispatch_mode: str
     result: Dict[str, Any]
 
+    # Conversational Additions
+    conversation_id: Optional[str]
+    client_request_id: Optional[str]
+    turn_action_type: Optional[str]
+    turn_action_details: Optional[Dict[str, Any]]
+    has_new_files: Optional[bool]
+    active_context: Optional[Dict[str, Any]]
+    pending_task: Optional[Dict[str, Any]]
+    map_action: Optional[Dict[str, Any]]
+
 
 def node_sift_and_validate(state: RouterState) -> Dict[str, Any]:
     """
@@ -69,7 +85,25 @@ def node_sift_and_validate(state: RouterState) -> Dict[str, Any]:
     Inspects physical file contents, sensor metadata, bands, CRS, transform,
     and dimensions to issue immutable SceneManifests.
     """
-    file_paths = state.get("file_paths", [])
+    file_paths = list(state.get("file_paths", []))
+    conv_id = state.get("conversation_id")
+
+    # If this is a pending input continuation (e.g. comparison awaiting second image)
+    # and only the new image was uploaded in this turn, automatically pair with the original image
+    if conv_id and len(file_paths) == 1 and state.get("turn_action_type") == "pending_input_continuation":
+        db = SessionLocal()
+        try:
+            orig_ds = db.query(ConversationDataset).filter(
+                ConversationDataset.conversation_id == conv_id,
+                ConversationDataset.role.in_(["original", "primary"])
+            ).order_by(ConversationDataset.created_at.asc()).first()
+            if orig_ds and os.path.exists(orig_ds.file_path) and orig_ds.file_path not in file_paths:
+                file_paths.insert(0, orig_ds.file_path)
+        except Exception as e:
+            logger.warning(f"Could not link previous original dataset: {e}")
+        finally:
+            db.close()
+
     validation_info = {}
     manifests = []
 
@@ -98,6 +132,7 @@ def node_sift_and_validate(state: RouterState) -> Dict[str, Any]:
         pair_manifest = pair.model_dump()
 
     return {
+        "file_paths": file_paths,
         "validation_info": validation_info,
         "manifests": manifests,
         "pair_manifest": pair_manifest
@@ -149,6 +184,7 @@ def node_raster_measurements(state: RouterState) -> Dict[str, Any]:
     if file_paths:
         facts = extract_geotiff_facts(file_paths[0])
 
+    veg_delta = None
     if task == "spectral_index" and file_paths:
         idx_res = compute_spectral_index(file_paths[0], index_type="ndvi")
         if "error" not in idx_res:
@@ -156,6 +192,10 @@ def node_raster_measurements(state: RouterState) -> Dict[str, Any]:
 
     elif task in ("change_detection", "change_difference_raster") and len(file_paths) >= 2:
         pair_metrics = compute_bitemporal_metrics(file_paths[0], file_paths[1])
+
+    elif task == "temporal_vegetation_loss" and len(file_paths) >= 2:
+        from backend.app.services.raster_measurements import compute_temporal_vegetation_change
+        veg_delta = compute_temporal_vegetation_change(file_paths[0], file_paths[1])
 
     # Construct EvidenceBundle
     bundle = build_evidence_bundle(
@@ -169,7 +209,8 @@ def node_raster_measurements(state: RouterState) -> Dict[str, Any]:
         "raster_measurements": {
             "facts": facts,
             "spectral": measurements,
-            "temporal": pair_metrics
+            "temporal": pair_metrics,
+            "vegetation_delta": veg_delta
         },
         "evidence_bundle": bundle.model_dump()
     }
@@ -204,9 +245,27 @@ def node_dispatch_or_execute(state: RouterState) -> Dict[str, Any]:
     # Pure Deterministic Route (No model needed)
     if model_id is None:
         meas_info = state.get("raster_measurements", {})
-        if task == "spectral_index":
+        if task == "raster_metadata":
+            facts = meas_info.get("facts", {})
+            fp = facts.get("footprint_km2")
+            fp_str = f"{fp} km²" if fp is not None else "unreferenced in physical ground space"
+            narrative = (
+                f"The uploaded raster image covers a physical surface footprint of {fp_str} "
+                f"(native pixel resolution: {facts.get('resolution_m', 'N/A')} m, Coordinate Reference System: {facts.get('crs') or 'Pixel Space'}, "
+                f"dimensions: {facts.get('width', 0)} × {facts.get('height', 0)} pixels across {facts.get('bands', 0)} bands)."
+            )
+        elif task == "spectral_index":
             idx = meas_info.get("spectral", [{}])[0] if meas_info.get("spectral") else {}
             narrative = f"NDVI mean: {idx.get('mean', 'N/A')}, range [{idx.get('min')}, {idx.get('max')}]. Threshold exceedance: {idx.get('threshold_exceed_pct', 0)}% of valid pixels."
+        elif task == "temporal_vegetation_loss":
+            veg = meas_info.get("vegetation_delta") or {}
+            loss_pct = veg.get("loss_pct_of_baseline", 0)
+            lost_km2 = veg.get("lost_vegetation_area_km2")
+            area_str = f" ({lost_km2} km²)" if lost_km2 is not None else ""
+            narrative = (
+                f"Comparative vegetation analysis between the earlier and later satellite observations reveals a {loss_pct}% loss "
+                f"of baseline vegetation{area_str}. The primary concentration of vegetation clearance occurred in the {veg.get('primary_loss_sector', 'central')} sector."
+            )
         elif task == "change_difference_raster":
             tmp = meas_info.get("temporal", {})
             narrative = f"Bitemporal difference detected: {tmp.get('change_pct', 0)}% changed pixels ({tmp.get('changed_area_km2', 'N/A')} km²)."
@@ -383,18 +442,350 @@ def node_dispatch_or_execute(state: RouterState) -> Dict[str, Any]:
         }
 
 
-# Construct StateGraph with the complete scientific pipeline
+# ---------------- Conversational Nodes ----------------
+
+def node_classify_turn(state: RouterState) -> Dict[str, Any]:
+    """
+    Lightweight Turn Classifier & Intent Resolution Node.
+    Inspects user prompt, conversation context, and new files to determine
+    the appropriate execution path (saved_fact, map_action, explanation,
+    parameter_modification, spatial_proximity, clarification, or new_analysis).
+    """
+    conv_id = state.get("conversation_id")
+    prompt = state.get("prompt", "")
+    files = state.get("file_paths", [])
+    active_ctx = state.get("active_context") or {}
+
+    # If active_context is empty but conversation_id exists, load from DB
+    if conv_id and not active_ctx:
+        db = SessionLocal()
+        try:
+            conv = db.query(Conversation).filter(Conversation.id == conv_id).first()
+            if conv and conv.active_context_json:
+                active_ctx = json.loads(conv.active_context_json)
+        except Exception as e:
+            logger.warning(f"Could not load conversation active_context: {e}")
+        finally:
+            db.close()
+
+    # If action_type was explicitly pre-specified in state, preserve it
+    action_type = state.get("turn_action_type")
+    details = state.get("turn_action_details") or {}
+
+    has_new_files = state.get("has_new_files")
+    if has_new_files is None:
+        has_new_files = False
+
+    if not action_type:
+        action_type, details = ConversationEngine.parse_turn_intent(
+            prompt=prompt,
+            active_context=active_ctx,
+            has_new_files=has_new_files,
+            file_paths=files
+        )
+
+    return {
+        "turn_action_type": action_type,
+        "turn_action_details": details,
+        "active_context": active_ctx
+    }
+
+
+def _get_active_db():
+    """Returns active DB session, respecting FastAPI dependency overrides in test environments."""
+    try:
+        from backend.app.main import app
+        from backend.app.db.session import get_db
+        if hasattr(app, "dependency_overrides") and get_db in app.dependency_overrides:
+            override = app.dependency_overrides[get_db]
+            return next(override())
+    except Exception:
+        pass
+    return SessionLocal()
+
+
+def node_saved_fact(state: RouterState) -> Dict[str, Any]:
+    """
+    Saved Fact Node: Resolves verified statistical or detection facts
+    from previous results without triggering redundant vision model inference.
+    """
+    conv_id = state.get("conversation_id")
+    details = state.get("turn_action_details") or {}
+    target = details.get("target_result", "current")
+    metric = details.get("metric", "count")
+
+    db = _get_active_db()
+    try:
+        conv = db.query(Conversation).filter(Conversation.id == conv_id).first() if conv_id else None
+        if not conv:
+            res = {
+                "status": "EXECUTED_ISOLATED",
+                "summary": "No conversation found to retrieve facts from.",
+                "findings": [],
+                "validation": "skipped",
+                "model": "Fact Retrieval (Deterministic)"
+            }
+        else:
+            fact_res = ConversationEngine.execute_saved_fact(db, conv, target, metric)
+            res = {
+                "status": "EXECUTED_ISOLATED",
+                "summary": fact_res["summary"],
+                "findings": fact_res.get("findings", []),
+                "sections": fact_res.get("sections", {}),
+                "metrics": fact_res.get("metrics", {}),
+                "validation": fact_res.get("validation", "passed"),
+                "model": fact_res.get("model", "Fact Retrieval (Deterministic)")
+            }
+        return {"result": res}
+    finally:
+        db.close()
+
+
+def node_map_action(state: RouterState) -> Dict[str, Any]:
+    """
+    Map Action Node: Resolves active result and issues structured map display command
+    without triggering model inference.
+    """
+    conv_id = state.get("conversation_id")
+    db = _get_active_db()
+    try:
+        conv = db.query(Conversation).filter(Conversation.id == conv_id).first() if conv_id else None
+        if not conv:
+            res = {
+                "status": "EXECUTED_ISOLATED",
+                "summary": "No active conversation available for map actions.",
+                "findings": [],
+                "validation": "skipped",
+                "model": "Map Controller"
+            }
+            return {"result": res}
+
+        map_res = ConversationEngine.execute_map_action(db, conv)
+        res = {
+            "status": "EXECUTED_ISOLATED",
+            "summary": map_res["summary"],
+            "findings": map_res.get("findings", []),
+            "maskUrl": map_res.get("maskUrl"),
+            "map_action": map_res.get("map_action"),
+            "validation": map_res.get("validation", "passed"),
+            "model": "Map Action Controller"
+        }
+        return {"result": res, "map_action": map_res.get("map_action")}
+    finally:
+        db.close()
+
+
+def node_explanation(state: RouterState) -> Dict[str, Any]:
+    """
+    Explanation Node: Explains evidence, methods, and observations from the active result
+    without repeating GPU inference.
+    """
+    conv_id = state.get("conversation_id")
+    db = _get_active_db()
+    try:
+        conv = db.query(Conversation).filter(Conversation.id == conv_id).first() if conv_id else None
+        if not conv:
+            res = {
+                "status": "EXECUTED_ISOLATED",
+                "summary": "No previous analysis result available to explain.",
+                "findings": [],
+                "validation": "skipped"
+            }
+        else:
+            exp_res = ConversationEngine.execute_explanation(db, conv)
+            res = {
+                "status": "EXECUTED_ISOLATED",
+                "summary": exp_res["summary"],
+                "findings": exp_res.get("findings", []),
+                "sections": exp_res.get("sections", {}),
+                "validation": exp_res.get("validation", "passed"),
+                "model": "Evidence Explainer"
+            }
+        return {"result": res}
+    finally:
+        db.close()
+
+
+def node_parameter_modification(state: RouterState) -> Dict[str, Any]:
+    """
+    Parameter Modification Node: Modifies an analytical parameter (e.g., distance threshold)
+    against the original base result, creating a new derived result with lineage.
+    Enforces spatial integrity checks (Section 16).
+    """
+    conv_id = state.get("conversation_id")
+    details = state.get("turn_action_details") or {}
+    param_key = details.get("parameter", "distance_m")
+    val = details.get("value", 500)
+    op = details.get("operation", "proximity_filter")
+
+    db = _get_active_db()
+    try:
+        conv = db.query(Conversation).filter(Conversation.id == conv_id).first() if conv_id else None
+        if not conv:
+            res = {
+                "status": "BLOCKED",
+                "summary": "No conversation found for parameter modification.",
+                "validation": "failed",
+                "decision_reason": "Missing conversation context."
+            }
+        else:
+            param_res = ConversationEngine.execute_parameter_modification(
+                db=db,
+                conversation=conv,
+                parameter_key=param_key,
+                value=val,
+                operation=op
+            )
+            res = {
+                "status": "EXECUTED_ISOLATED" if param_res.get("validation") == "passed" else "BLOCKED",
+                "summary": param_res["summary"],
+                "findings": param_res.get("findings", []),
+                "sections": param_res.get("sections", {}),
+                "validation": param_res.get("validation", "passed"),
+                "model": param_res.get("model", "Spatial Parameter Engine"),
+                "decision_reason": param_res.get("decision_reason")
+            }
+        return {"result": res}
+    finally:
+        db.close()
+
+
+def node_spatial_proximity(state: RouterState) -> Dict[str, Any]:
+    """
+    Spatial Proximity Gate Node: Enforces Section 16 & Requirement 7.
+    Rejects unspecified proximity ("close") without distance threshold or road geometry.
+    """
+    conv_id = state.get("conversation_id")
+    details = state.get("turn_action_details") or {}
+
+    db = _get_active_db()
+    try:
+        conv = db.query(Conversation).filter(Conversation.id == conv_id).first() if conv_id else None
+        if not conv:
+            res = {
+                "status": "BLOCKED",
+                "summary": "No active conversation context for spatial proximity query.",
+                "validation": "failed"
+            }
+        else:
+            prox_res = ConversationEngine.handle_spatial_proximity_query(db, conv, details)
+            res = {
+                "status": "EXECUTED_ISOLATED" if prox_res.get("validation") == "passed" else "BLOCKED",
+                "summary": prox_res["summary"],
+                "findings": prox_res.get("findings", []),
+                "sections": prox_res.get("sections", {}),
+                "validation": prox_res.get("validation", "failed"),
+                "model": prox_res.get("model", "Spatial Proximity Validator"),
+                "decision_reason": prox_res.get("decision_reason")
+            }
+        return {"result": res}
+    finally:
+        db.close()
+
+
+def node_clarification(state: RouterState) -> Dict[str, Any]:
+    """
+    Clarification Node: Emits a structured request for missing input (e.g. comparison image)
+    and records the pending task in the conversation.
+    """
+    conv_id = state.get("conversation_id")
+    details = state.get("turn_action_details") or {}
+    msg = details.get("message", "Clarification requested.")
+    pending = details.get("pending_task")
+
+    # Persist pending_task into conversation active_context
+    if conv_id and pending:
+        db = _get_active_db()
+        try:
+            conv = db.query(Conversation).filter(Conversation.id == conv_id).first()
+            if conv:
+                ctx = json.loads(conv.active_context_json or "{}")
+                ctx["pending_task"] = pending
+                conv.active_context_json = json.dumps(ctx)
+                db.commit()
+        except Exception as e:
+            logger.warning(f"Failed to record pending_task: {e}")
+        finally:
+            db.close()
+
+    res = {
+        "status": "NEEDS_INPUT",
+        "summary": msg,
+        "findings": [],
+        "validation": "skipped",
+        "pending_task": pending,
+        "model": "Conversation Controller",
+        "decision_reason": "Awaiting second comparison image."
+    }
+    return {"result": res, "pending_task": pending}
+
+
+def route_turn_path(state: RouterState) -> str:
+    """Conditional router function directing the turn to the appropriate branch."""
+    action = state.get("turn_action_type", "new_analysis")
+    if action == "saved_fact":
+        return "saved_fact"
+    elif action == "map_action":
+        return "map_action"
+    elif action == "explanation":
+        return "explanation"
+    elif action == "parameter_modification":
+        return "parameter_modification"
+    elif action == "spatial_proximity":
+        return "spatial_proximity"
+    elif action == "clarification":
+        return "clarification"
+    return "sift_and_validate"
+
+
+# Construct StateGraph with Conversational Intelligence & Scientific Pipeline
 builder = StateGraph(RouterState)
 
+# Conversational routing nodes
+builder.add_node("classify_turn", node_classify_turn)
+builder.add_node("saved_fact", node_saved_fact)
+builder.add_node("map_action", node_map_action)
+builder.add_node("explanation", node_explanation)
+builder.add_node("parameter_modification", node_parameter_modification)
+builder.add_node("spatial_proximity", node_spatial_proximity)
+builder.add_node("clarification", node_clarification)
+
+# Scientific analytical pipeline nodes
 builder.add_node("sift_and_validate", node_sift_and_validate)
 builder.add_node("route_decision", node_route_decision)
 builder.add_node("raster_measurements", node_raster_measurements)
 builder.add_node("dispatch_or_execute", node_dispatch_or_execute)
 
-builder.set_entry_point("sift_and_validate")
+# Entry point & conditional branches
+builder.set_entry_point("classify_turn")
+
+builder.add_conditional_edges(
+    "classify_turn",
+    route_turn_path,
+    {
+        "saved_fact": "saved_fact",
+        "map_action": "map_action",
+        "explanation": "explanation",
+        "parameter_modification": "parameter_modification",
+        "spatial_proximity": "spatial_proximity",
+        "clarification": "clarification",
+        "sift_and_validate": "sift_and_validate",
+    }
+)
+
+# Terminal edges for conversational actions
+builder.add_edge("saved_fact", END)
+builder.add_edge("map_action", END)
+builder.add_edge("explanation", END)
+builder.add_edge("parameter_modification", END)
+builder.add_edge("spatial_proximity", END)
+builder.add_edge("clarification", END)
+
+# Sequential edges for analytical pipeline
 builder.add_edge("sift_and_validate", "route_decision")
 builder.add_edge("route_decision", "raster_measurements")
 builder.add_edge("raster_measurements", "dispatch_or_execute")
 builder.add_edge("dispatch_or_execute", END)
 
 task_router_app = builder.compile()
+

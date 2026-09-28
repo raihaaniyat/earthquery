@@ -493,3 +493,98 @@ class ExternalContextRecord(Base):
     finding = relationship("Finding", backref="external_contexts")
 
 
+class Conversation(Base):
+    __tablename__ = "conversations"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    project_id = Column(String(36), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    title = Column(String(255), default="New Analysis Conversation", nullable=False)
+    state_revision = Column(Integer, default=1, nullable=False)
+    active_context_json = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+    messages = relationship("ConversationMessage", back_populates="conversation", cascade="all, delete-orphan", order_by="ConversationMessage.created_at")
+    turns = relationship("ConversationTurn", back_populates="conversation", cascade="all, delete-orphan", order_by="ConversationTurn.created_at")
+    datasets = relationship("ConversationDataset", back_populates="conversation", cascade="all, delete-orphan")
+    results = relationship("ConversationResult", back_populates="conversation", cascade="all, delete-orphan")
+
+
+class ConversationMessage(Base):
+    __tablename__ = "conversation_messages"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    conversation_id = Column(String(36), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True)
+    turn_id = Column(String(36), nullable=True, index=True)
+    role = Column(String(20), nullable=False)  # 'user', 'assistant', 'system'
+    content = Column(Text, nullable=False)
+    client_request_id = Column(String(128), nullable=True, index=True)
+    metadata_json = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+    conversation = relationship("Conversation", back_populates="messages")
+
+
+class ConversationTurn(Base):
+    __tablename__ = "conversation_turns"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    conversation_id = Column(String(36), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True)
+    client_request_id = Column(String(128), nullable=False, index=True)
+    user_message_id = Column(String(36), nullable=True)
+    status = Column(String(50), default="accepted", nullable=False)  # 'accepted', 'running', 'completed', 'needs_input', 'failed'
+    turn_type = Column(String(50), default="analysis", nullable=False)  # 'analysis', 'saved_fact', 'map_action', 'parameter_modification', 'explanation', 'clarification'
+    result_id = Column(String(36), nullable=True)
+    job_id = Column(String(36), nullable=True)
+    attempt = Column(Integer, default=1, nullable=False)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    conversation = relationship("Conversation", back_populates="turns")
+
+    __table_args__ = (
+        UniqueConstraint("conversation_id", "client_request_id", name="uq_conv_turn_request"),
+    )
+
+
+class ConversationDataset(Base):
+    __tablename__ = "conversation_datasets"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    conversation_id = Column(String(36), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True)
+    file_path = Column(String(512), nullable=False)
+    file_name = Column(String(255), nullable=False)
+    file_size = Column(BigInteger, nullable=True)
+    mime_type = Column(String(100), nullable=True)
+    role = Column(String(50), default="original", nullable=False)  # 'original', 'earlier_image', 'later_image', 'comparison_input'
+    acquisition_date = Column(String(50), nullable=True)
+    metadata_json = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+    conversation = relationship("Conversation", back_populates="datasets")
+
+
+class ConversationResult(Base):
+    __tablename__ = "conversation_results"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    conversation_id = Column(String(36), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True)
+    turn_id = Column(String(36), nullable=True, index=True)
+    parent_result_id = Column(String(36), nullable=True, index=True)
+    result_role = Column(String(50), default="original", nullable=False)  # 'original', 'derived', 'filtered', 'comparison'
+    operation = Column(String(100), nullable=False)
+    parameters_json = Column(Text, nullable=True)
+    summary = Column(Text, nullable=False)
+    findings_json = Column(Text, nullable=True)
+    sections_json = Column(Text, nullable=True)
+    metrics_json = Column(Text, nullable=True)
+    mask_url = Column(String(512), nullable=True)
+    source_dataset_ids_json = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+    conversation = relationship("Conversation", back_populates="results")
+
+
+

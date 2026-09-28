@@ -1,13 +1,14 @@
 export type PageId =
-'home' |
-'chat' |
-'analyze' |
-'advanced' |
-'temporal' |
-'map' |
-'comparison' |
-'history' |
-'reports';
+  | 'home'
+  | 'chat'
+  | 'geotiff'
+  | 'analyze'
+  | 'advanced'
+  | 'temporal'
+  | 'map'
+  | 'comparison'
+  | 'history'
+  | 'reports';
 
 export type Theme = 'dark' | 'light';
 
@@ -227,4 +228,88 @@ export interface ChatSession {
 export interface ComparisonPair {
   before: AttachedImage | null;
   after: AttachedImage | null;
+}
+
+export interface ConversationItem {
+  id: string;
+  title: string;
+  state_revision: number;
+  created_at: string | null;
+  updated_at: string | null;
+  message_count: number;
+  dataset_count: number;
+  pending_task?: any;
+}
+
+export interface ConversationMessageItem {
+  id: string;
+  conversation_id: string;
+  turn_id?: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  client_request_id?: string;
+  created_at: string | null;
+  metadata?: Record<string, any>;
+  summary?: string;
+  findings?: AnalysisFinding[];
+  sections?: ScientificSections;
+  model?: string;
+  maskUrl?: string;
+  mapAction?: any;
+  validation?: string;
+}
+
+export interface ConversationDatasetItem {
+  id: string;
+  file_name: string;
+  file_path: string;
+  role: string;
+  file_size: number;
+  mime_type: string;
+  acquisition_date: string | null;
+  created_at: string | null;
+}
+
+export interface ConversationSnapshot {
+  conversation: {
+    id: string;
+    title: string;
+    state_revision: number;
+    created_at: string | null;
+    updated_at: string | null;
+  };
+  messages: ConversationMessageItem[];
+  datasets: ConversationDatasetItem[];
+  active_context: Record<string, any>;
+  pending_task?: any;
+  latest_map_action?: any;
+}
+
+export interface ConversationTurnResponse {
+  conversation_id: string;
+  turn_id: string;
+  client_request_id: string;
+  state_revision: number;
+  user_message: {
+    id: string;
+    role: string;
+    content: string;
+    created_at: string | null;
+  };
+  assistant_message: {
+    id: string;
+    role: string;
+    content: string;
+    metadata: Record<string, any>;
+    created_at: string | null;
+  };
+  summary: string;
+  findings: AnalysisFinding[];
+  sections: ScientificSections;
+  model: string;
+  maskUrl?: string;
+  mapAction?: any;
+  pending_task?: any;
+  active_context: Record<string, any>;
+  status: string;
 }

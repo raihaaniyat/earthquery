@@ -1,7 +1,7 @@
-import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useApp } from './AppContext';
 import { usePersistentState } from '../hooks/usePersistentState';
-import { api } from '../utils/api';
+import { api, MODEL_MAP, TASK_MAP } from '../utils/api';
 import { createId, loadAttachedImage } from '../utils/files';
 import { TASK_LABELS, describeAoi, inferTask, todayIso, validateAoi } from '../utils/geo';
 import type {
@@ -13,6 +13,8 @@ import type {
   AttachedImage,
   ChatSession,
   ComparisonPair,
+  ConversationSnapshot,
+  ConversationMessageItem,
   HistoryEntry,
   HistoryStatus,
   ImagerySettings,
@@ -36,7 +38,7 @@ interface WorkspaceValue {
   activeTool: AdvancedToolId | null;
   setActiveTool: (t: AdvancedToolId | null) => void;
   chat: ChatSession | null;
-  startAnalysis: (query?: string) => void;
+  startAnalysis: (query?: string, files?: File[]) => Promise<void>;
   rerunChat: () => void;
   newAnalysis: () => void;
   comparisonPair: ComparisonPair;
@@ -55,6 +57,15 @@ interface WorkspaceValue {
   reports: ReportEntry[];
   createReport: (historyId: string) => void;
   removeReport: (id: string) => void;
+  conversationId: string | null;
+  conversationSnapshot: ConversationSnapshot | null;
+  isConversationLoading: boolean;
+  conversationError: string | null;
+  latestMapAction: any | null;
+  loadConversation: (id: string) => Promise<void>;
+  sendFollowUp: (prompt: string, newFiles?: File[]) => Promise<void>;
+  retryLastTurn: () => Promise<void>;
+  deleteConversationById: (id: string) => Promise<void>;
 }
 
 const WorkspaceContext = createContext<WorkspaceValue | null>(null);
@@ -96,6 +107,29 @@ export function WorkspaceProvider({ children }: {children: React.ReactNode;}) {
   const [temporalImages, setTemporalImages] = useState<AttachedImage[]>([]);
   const [history, setHistory] = usePersistentState<HistoryEntry[]>('satquery-history', []);
   const [reports, setReports] = usePersistentState<ReportEntry[]>('satquery-reports', []);
+
+  // Multi-Turn Persistent Conversational Analyst state
+  const [conversationId, setConversationId] = usePersistentState<string | null>('satquery-active-conv-id', null);
+  const [conversationSnapshot, setConversationSnapshot] = useState<ConversationSnapshot | null>(null);
+  const [isConversationLoading, setIsConversationLoading] = useState(false);
+  const [conversationError, setConversationError] = useState<string | null>(null);
+  const [latestMapAction, setLatestMapAction] = useState<any | null>(null);
+
+  // Restore active conversation on page load / refresh (Invariant 10, Section 5, 26)
+  useEffect(() => {
+    if (conversationId && !conversationSnapshot) {
+      setIsConversationLoading(true);
+      api.getConversationSnapshot(conversationId).then((res) => {
+        setIsConversationLoading(false);
+        if (res.status === 'success') {
+          setConversationSnapshot(res.data);
+          if (res.data.latest_map_action) setLatestMapAction(res.data.latest_map_action);
+        }
+      }).catch(() => {
+        setIsConversationLoading(false);
+      });
+    }
+  }, [conversationId, conversationSnapshot]);
 
   const updateImagery = useCallback((patch: Partial<ImagerySettings>) => setImagery((p) => ({ ...p, ...patch })), []);
 
@@ -216,28 +250,411 @@ export function WorkspaceProvider({ children }: {children: React.ReactNode;}) {
   );
 
   const startAnalysis = useCallback(
-    (override?: string) => {
+    async (override?: string, filesOverride?: File[]) => {
+      // Prevent double submissions
+      if (isConversationLoading) return;
+
       const q = (override ?? query).trim();
-      if (!q && attachments.length === 0 && !aoi) {
+      const imgs: AttachedImage[] = filesOverride && filesOverride.length > 0
+        ? filesOverride.map((f) => ({
+            id: createId(),
+            name: f.name,
+            size: f.size,
+            type: f.type,
+            file: f,
+            url: URL.createObjectURL(f),
+            width: 0,
+            height: 0,
+            previewable: f.type.startsWith('image/'),
+            image: null
+          }))
+        : attachments;
+
+      if (!q && imgs.length === 0 && !aoi) {
         toast('Enter a question, attach imagery, or select an AOI', 'error');
         return;
       }
+
+      // Snapshot immutable values
       const finalQuery = q || 'Analyze this satellite imagery.';
-      const session: ChatSession = {
+      const filesToSubmit = [...imgs];
+      const newConvId = conversationId || createId();
+      const optimisticReqId = createId();
+
+      // Clear composer drafts immediately so they don't linger
+      setQuery('');
+      setAttachments([]);
+
+      setConversationId(newConvId);
+      setIsConversationLoading(true);
+      setConversationError(null);
+      navigate('chat');
+
+      // Optimistic initial user message
+      const optimisticMsg: ConversationMessageItem = {
         id: createId(),
+        conversation_id: newConvId,
+        role: 'user',
+        content: finalQuery,
+        client_request_id: optimisticReqId,
+        created_at: new Date().toISOString()
+      };
+
+      setConversationSnapshot({
+        conversation: {
+          id: newConvId,
+          title: finalQuery.length > 38 ? finalQuery.slice(0, 38) + '...' : finalQuery,
+          state_revision: 1,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+        messages: [optimisticMsg],
+        datasets: filesToSubmit.map((a) => ({
+          id: a.id,
+          file_name: a.name,
+          file_path: a.url,
+          role: 'original',
+          file_size: a.size,
+          mime_type: a.type || 'image/jpeg',
+          acquisition_date: null,
+          created_at: new Date().toISOString()
+        })),
+        active_context: {},
+        pending_task: null
+      });
+
+      // Backward compatible session for legacy components
+      const session: ChatSession = {
+        id: newConvId,
         query: finalQuery,
-        attachments: [...attachments],
+        attachments: [...filesToSubmit],
         aoi,
-        task: inferTask(finalQuery, attachments.length),
+        task: inferTask(finalQuery, filesToSubmit.length),
         createdAt: Date.now(),
-        run: { status: 'idle' },
+        run: { status: 'loading', message: 'Analyzing scene with AI pipeline…' },
         historyId: null
       };
       setChat(session);
-      navigate('chat');
-      void executeChat(session);
+
+      const files = filesToSubmit.map((a) => a.file);
+      try {
+        const turnRes = await api.sendConversationMessage(newConvId, {
+          prompt: finalQuery,
+          client_request_id: optimisticReqId,
+          task: TASK_MAP[session.task] || 'internvl',
+          model: MODEL_MAP[modelSettings.model] || ''
+        }, files.length > 0 ? files : undefined);
+
+        setIsConversationLoading(false);
+        if (turnRes.status === 'success') {
+          // Immediately apply assistant message into conversation snapshot
+          setConversationSnapshot((prev) => {
+            const userMsg: ConversationMessageItem = {
+              id: turnRes.data.user_message?.id || optimisticMsg.id,
+              conversation_id: newConvId,
+              role: 'user',
+              content: turnRes.data.user_message?.content || optimisticMsg.content,
+              client_request_id: optimisticReqId,
+              created_at: turnRes.data.user_message?.created_at || optimisticMsg.created_at
+            };
+            const asstMsg: ConversationMessageItem | null = turnRes.data.assistant_message ? {
+              id: turnRes.data.assistant_message.id,
+              conversation_id: newConvId,
+              role: 'assistant',
+              content: turnRes.data.assistant_message.content,
+              metadata: turnRes.data.assistant_message.metadata,
+              created_at: turnRes.data.assistant_message.created_at,
+              findings: turnRes.data.findings,
+              sections: turnRes.data.sections,
+              model: turnRes.data.model,
+              maskUrl: turnRes.data.maskUrl,
+              mapAction: turnRes.data.mapAction
+            } : null;
+            return {
+              conversation: {
+                id: newConvId,
+                title: finalQuery.length > 38 ? finalQuery.slice(0, 38) + '...' : finalQuery,
+                state_revision: turnRes.data.state_revision,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              },
+              messages: [userMsg, ...(asstMsg ? [asstMsg] : [])],
+              datasets: (prev?.datasets && prev.datasets.length > 0) ? prev.datasets : filesToSubmit.map((a) => ({
+                id: a.id,
+                file_name: a.name,
+                file_path: a.url,
+                role: 'original',
+                file_size: a.size,
+                mime_type: a.type || 'image/jpeg',
+                acquisition_date: null,
+                created_at: new Date().toISOString()
+              })),
+              active_context: turnRes.data.active_context || {},
+              pending_task: turnRes.data.pending_task ?? null
+            };
+          });
+
+          // Fetch canonical database snapshot to ensure persistence consistency
+          const snapRes = await api.getConversationSnapshot(newConvId);
+          if (snapRes.status === 'success') {
+            setConversationSnapshot(snapRes.data);
+            if (snapRes.data.latest_map_action) setLatestMapAction(snapRes.data.latest_map_action);
+          }
+
+          if (turnRes.data.mapAction) {
+            setLatestMapAction(turnRes.data.mapAction);
+          }
+
+          logResult(session.task, finalQuery, filesToSubmit.map((a) => a.name), {
+            status: 'success',
+            data: {
+              summary: turnRes.data.summary,
+              findings: turnRes.data.findings,
+              sections: turnRes.data.sections,
+              model: turnRes.data.model,
+              maskUrl: turnRes.data.maskUrl,
+              metrics: turnRes.data.active_context?.last_operation?.parameters
+            }
+          });
+          setChat({
+            ...session,
+            run: {
+              status: 'success',
+              data: {
+                summary: turnRes.data.summary,
+                findings: turnRes.data.findings,
+                sections: turnRes.data.sections,
+                model: turnRes.data.model,
+                maskUrl: turnRes.data.maskUrl
+              }
+            }
+          });
+        } else {
+          const errMsg = 'message' in turnRes ? turnRes.message : 'Error executing analysis';
+          setConversationError(errMsg);
+          toast(errMsg, 'error');
+        }
+      } catch (err: any) {
+        setIsConversationLoading(false);
+        const errMsg = err?.message || 'Network error executing analysis';
+        setConversationError(errMsg);
+        toast('Failed to complete analysis', 'error');
+      }
     },
-    [query, attachments, aoi, toast, navigate, executeChat]
+    [query, attachments, aoi, conversationId, isConversationLoading, toast, navigate, logResult, modelSettings, setConversationId]
+  );
+
+  const sendFollowUp = useCallback(
+    async (promptText: string, newFiles?: File[]) => {
+      if (!conversationId || isConversationLoading) return;
+      const q = promptText.trim();
+      if (!q && (!newFiles || newFiles.length === 0)) return;
+
+      const reqId = createId();
+      setIsConversationLoading(true);
+      setConversationError(null);
+
+      // Optimistic message
+      const optimisticMsg: ConversationMessageItem = {
+        id: createId(),
+        conversation_id: conversationId,
+        role: 'user',
+        content: q || (newFiles && newFiles.length > 0 ? `Attached ${newFiles.length} file(s)` : ''),
+        client_request_id: reqId,
+        created_at: new Date().toISOString()
+      };
+
+      setConversationSnapshot((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          messages: [...prev.messages, optimisticMsg]
+        };
+      });
+
+      try {
+        const res = await api.sendConversationMessage(conversationId, {
+          prompt: q,
+          client_request_id: reqId,
+          model: MODEL_MAP[modelSettings.model] || ''
+        }, newFiles);
+
+        setIsConversationLoading(false);
+        if (res.status === 'success') {
+          if (res.data.assistant_message) {
+            setConversationSnapshot((prev) => {
+              if (!prev) return prev;
+              const filtered = prev.messages.filter((m) => m.client_request_id !== reqId);
+              const userMsg: ConversationMessageItem = {
+                id: res.data.user_message?.id || optimisticMsg.id,
+                conversation_id: conversationId,
+                role: 'user',
+                content: res.data.user_message?.content || optimisticMsg.content,
+                client_request_id: reqId,
+                created_at: res.data.user_message?.created_at || optimisticMsg.created_at
+              };
+              const asstMsg: ConversationMessageItem = {
+                id: res.data.assistant_message.id,
+                conversation_id: conversationId,
+                role: 'assistant',
+                content: res.data.assistant_message.content,
+                metadata: res.data.assistant_message.metadata,
+                created_at: res.data.assistant_message.created_at,
+                findings: res.data.findings,
+                sections: res.data.sections,
+                model: res.data.model,
+                maskUrl: res.data.maskUrl,
+                mapAction: res.data.mapAction
+              };
+              return {
+                ...prev,
+                conversation: {
+                  ...prev.conversation,
+                  state_revision: res.data.state_revision
+                },
+                messages: [...filtered, userMsg, asstMsg],
+                active_context: res.data.active_context || prev.active_context,
+                pending_task: res.data.pending_task ?? null
+              };
+            });
+          }
+          const snapRes = await api.getConversationSnapshot(conversationId);
+          if (snapRes.status === 'success') {
+            setConversationSnapshot(snapRes.data);
+            if (snapRes.data.latest_map_action) {
+              setLatestMapAction(snapRes.data.latest_map_action);
+            }
+          }
+          if (res.data.mapAction) {
+            setLatestMapAction(res.data.mapAction);
+          }
+        } else {
+          const errMsg = 'message' in res ? res.message : 'Error processing follow-up';
+          setConversationError(errMsg);
+          toast(errMsg, 'error');
+        }
+      } catch (err: any) {
+        setIsConversationLoading(false);
+        setConversationError(err?.message || 'Network error');
+        toast('Failed to send follow-up', 'error');
+      }
+    },
+    [conversationId, isConversationLoading, modelSettings, toast]
+  );
+
+  const retryLastTurn = useCallback(
+    async () => {
+      if (!conversationId || isConversationLoading) return;
+      const msgs = conversationSnapshot?.messages || [];
+      if (msgs.length === 0) return;
+      const lastMsg = msgs[msgs.length - 1];
+      if (lastMsg.role !== 'user') return;
+
+      const reqId = createId();
+      setIsConversationLoading(true);
+      setConversationError(null);
+
+      try {
+        const res = await api.sendConversationMessage(conversationId, {
+          prompt: lastMsg.content,
+          client_request_id: reqId,
+          model: MODEL_MAP[modelSettings.model] || ''
+        });
+
+        setIsConversationLoading(false);
+        if (res.status === 'success') {
+          if (res.data.assistant_message) {
+            setConversationSnapshot((prev) => {
+              if (!prev) return prev;
+              const asstMsg: ConversationMessageItem = {
+                id: res.data.assistant_message.id,
+                conversation_id: conversationId,
+                role: 'assistant',
+                content: res.data.assistant_message.content,
+                metadata: res.data.assistant_message.metadata,
+                created_at: res.data.assistant_message.created_at,
+                findings: res.data.findings,
+                sections: res.data.sections,
+                model: res.data.model,
+                maskUrl: res.data.maskUrl,
+                mapAction: res.data.mapAction
+              };
+              return {
+                ...prev,
+                conversation: {
+                  ...prev.conversation,
+                  state_revision: res.data.state_revision
+                },
+                messages: [...prev.messages, asstMsg],
+                active_context: res.data.active_context || prev.active_context,
+                pending_task: res.data.pending_task ?? null
+              };
+            });
+          }
+          const snapRes = await api.getConversationSnapshot(conversationId);
+          if (snapRes.status === 'success') {
+            setConversationSnapshot(snapRes.data);
+            if (snapRes.data.latest_map_action) {
+              setLatestMapAction(snapRes.data.latest_map_action);
+            }
+          }
+          if (res.data.mapAction) {
+            setLatestMapAction(res.data.mapAction);
+          }
+          toast('Analysis complete', 'success');
+        } else {
+          const errMsg = 'message' in res ? res.message : 'Error executing analysis';
+          setConversationError(errMsg);
+          toast(errMsg, 'error');
+        }
+      } catch (err: any) {
+        setIsConversationLoading(false);
+        setConversationError(err?.message || 'Network error');
+        toast('Failed to retry analysis', 'error');
+      }
+    },
+    [conversationId, conversationSnapshot, isConversationLoading, modelSettings, toast]
+  );
+
+  const loadConversation = useCallback(
+    async (id: string) => {
+      setIsConversationLoading(true);
+      setConversationError(null);
+      setConversationId(id);
+      try {
+        const snapRes = await api.getConversationSnapshot(id);
+        setIsConversationLoading(false);
+        if (snapRes.status === 'success') {
+          setConversationSnapshot(snapRes.data);
+          if (snapRes.data.latest_map_action) {
+            setLatestMapAction(snapRes.data.latest_map_action);
+          }
+          navigate('chat');
+        } else {
+          toast('Could not load conversation', 'error');
+        }
+      } catch {
+        setIsConversationLoading(false);
+        toast('Error loading conversation snapshot', 'error');
+      }
+    },
+    [setConversationId, navigate, toast]
+  );
+
+  const deleteConversationById = useCallback(
+    async (id: string) => {
+      try {
+        await api.deleteConversation(id);
+        if (conversationId === id) {
+          setConversationId(null);
+          setConversationSnapshot(null);
+        }
+        toast('Conversation deleted', 'default');
+      } catch {
+        toast('Failed to delete conversation', 'error');
+      }
+    },
+    [conversationId, setConversationId, toast]
   );
 
   const rerunChat = useCallback(() => {
@@ -248,8 +665,10 @@ export function WorkspaceProvider({ children }: {children: React.ReactNode;}) {
     setQuery('');
     setAttachments([]);
     setChat(null);
+    setConversationId(null);
+    setConversationSnapshot(null);
     navigate('home');
-  }, [navigate]);
+  }, [navigate, setConversationId]);
 
   const setComparisonPair = useCallback((p: ComparisonPair, runDiff = false) => {
     setPair(p);
@@ -304,14 +723,24 @@ export function WorkspaceProvider({ children }: {children: React.ReactNode;}) {
       clearHistory: () => setHistory([]),
       reports,
       createReport,
-      removeReport: (id) => setReports((prev) => prev.filter((r) => r.id !== id))
+      removeReport: (id) => setReports((prev) => prev.filter((r) => r.id !== id)),
+      conversationId,
+      conversationSnapshot,
+      isConversationLoading,
+      conversationError,
+      latestMapAction,
+      loadConversation,
+      sendFollowUp,
+      retryLastTurn,
+      deleteConversationById
     }),
     [
-    query, attachments, addFiles, removeAttachment, aoi, imagery, updateImagery, mapTool, activeTool, chat,
-    startAnalysis, rerunChat, newAnalysis, comparisonPair, setComparisonPair, pendingDiff, temporalImages,
-    addTemporalFiles, removeTemporalImage, buildRequest, history, logHistory, logResult, setHistory, reports,
-    createReport, setReports]
-
+      query, attachments, addFiles, removeAttachment, aoi, imagery, updateImagery, mapTool, activeTool, chat,
+      startAnalysis, rerunChat, newAnalysis, comparisonPair, setComparisonPair, pendingDiff, temporalImages,
+      addTemporalFiles, removeTemporalImage, buildRequest, history, logHistory, logResult, setHistory, reports,
+      createReport, setReports, conversationId, conversationSnapshot, isConversationLoading, conversationError,
+      latestMapAction, loadConversation, sendFollowUp, retryLastTurn, deleteConversationById
+    ]
   );
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;

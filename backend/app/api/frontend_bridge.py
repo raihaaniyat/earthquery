@@ -8,10 +8,12 @@ Supports both multipart form data (with file attachments) and application/json.
 """
 
 import os
+import re
 import json
 import uuid
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List, Tuple
 from pathlib import Path
 from fastapi import APIRouter, Request, HTTPException, Depends, status
@@ -22,11 +24,22 @@ logger = logging.getLogger(__name__)
 
 from backend.app.config import settings
 from backend.app.db.session import get_db, check_db_connection
-from backend.app.db.models import User
+from backend.app.db.models import (
+    User,
+    Conversation,
+    ConversationMessage,
+    ConversationTurn,
+    ConversationDataset,
+    ConversationResult
+)
 from backend.app.auth import get_current_user
 from backend.app.models_registry import list_models, get_capabilities
 from backend.app.router import task_router_app
 from backend.app.worker import get_redis_connection, check_redis_connection
+from backend.app.services.conversation_service import (
+    ConversationEngine,
+    extract_count_from_summary_or_findings
+)
 from backend.app.services.routing import (
     create_scene_manifest,
     create_pair_manifest,
@@ -97,6 +110,10 @@ async def parse_request_data_and_files(request: Request) -> Tuple[Dict[str, Any]
     else:
         try:
             data = await request.json()
+            if isinstance(data, dict):
+                json_files = data.get("file_paths") or data.get("files") or []
+                if isinstance(json_files, list):
+                    file_paths.extend([f for f in json_files if isinstance(f, str) and os.path.exists(f)])
         except Exception:
             data = {}
 
@@ -177,11 +194,15 @@ async def poll_job_or_format(
                                 metrics_data["status"] = "completed"
                                 response["metrics"] = metrics_data
 
+                                current_task = str((fallback_params or {}).get("task") or result.get("task") or "")
                                 assets = exec_result.get("output_assets", {})
                                 if "change_mask" in assets:
                                     mask_rel = Path(assets["change_mask"]).name
                                     response["maskUrl"] = f"/api/assets/{mask_rel}"
-                                elif "segmentation_mask" in assets:
+                                elif "grounding_overlay" in assets:
+                                    mask_rel = Path(assets["grounding_overlay"]).name
+                                    response["maskUrl"] = f"/api/assets/{mask_rel}"
+                                elif "segmentation_mask" in assets and current_task.lower() in ("segmentation", "landcover", "land_cover", "classification"):
                                     mask_rel = Path(assets["segmentation_mask"]).name
                                     response["maskUrl"] = f"/api/assets/{mask_rel}"
                             break
@@ -210,11 +231,15 @@ async def poll_job_or_format(
                 if fallback_res.get("participating_models"):
                     response["model"] = " + ".join(fallback_res["participating_models"])
                 response["metrics"] = {"status": "completed"}
+                current_task = str((fallback_params or {}).get("task") or result.get("task") or "")
                 assets = fallback_res.get("output_assets", {})
                 if "change_mask" in assets:
                     mask_rel = Path(assets["change_mask"]).name
                     response["maskUrl"] = f"/api/assets/{mask_rel}"
-                elif "segmentation_mask" in assets:
+                elif "grounding_overlay" in assets:
+                    mask_rel = Path(assets["grounding_overlay"]).name
+                    response["maskUrl"] = f"/api/assets/{mask_rel}"
+                elif "segmentation_mask" in assets and current_task.lower() in ("segmentation", "landcover", "land_cover", "classification"):
                     mask_rel = Path(assets["segmentation_mask"]).name
                     response["maskUrl"] = f"/api/assets/{mask_rel}"
             else:
@@ -260,11 +285,15 @@ async def poll_job_or_format(
             elif result.get("participating_models"):
                 response["model"] = " + ".join(result["participating_models"])
 
+            current_task = str((fallback_params or {}).get("task") or result.get("task") or "")
             assets = exec_result.get("output_assets", {}) or result.get("output_assets", {})
             if "change_mask" in assets:
                 mask_rel = Path(assets["change_mask"]).name
                 response["maskUrl"] = f"/api/assets/{mask_rel}"
-            elif "segmentation_mask" in assets:
+            elif "grounding_overlay" in assets:
+                mask_rel = Path(assets["grounding_overlay"]).name
+                response["maskUrl"] = f"/api/assets/{mask_rel}"
+            elif "segmentation_mask" in assets and current_task.lower() in ("segmentation", "landcover", "land_cover", "classification"):
                 mask_rel = Path(assets["segmentation_mask"]).name
                 response["maskUrl"] = f"/api/assets/{mask_rel}"
         else:
@@ -358,6 +387,10 @@ async def frontend_analysis(
     Dispatches through the LangGraph task router and awaits worker completion.
     """
     data, file_paths = await parse_request_data_and_files(request)
+    conv_id = data.get("conversation_id")
+    if conv_id:
+        return await execute_conversation_turn(conversation_id=conv_id, request=request, db=db)
+
 
     task = data.get("task", "internvl")
     prompt = data.get("prompt", "Analyze this satellite imagery.")
@@ -588,3 +621,541 @@ def get_asset_file(file_path: str):
         return FileResponse(str(matches[0]))
 
     raise HTTPException(status_code=404, detail="Asset not found")
+
+
+# =============================================================
+# Multi-Turn Conversational Analyst API Endpoints
+# =============================================================
+
+@router.get("/conversations")
+def list_conversations(
+    db: Session = Depends(get_db)
+):
+    """
+    Lists persisted analyst conversations ordered by most recent update.
+    Returns title, timestamps, message count, and active pending tasks.
+    """
+    convs = db.query(Conversation).order_by(Conversation.updated_at.desc()).all()
+    output = []
+    for c in convs:
+        msg_count = db.query(ConversationMessage).filter(ConversationMessage.conversation_id == c.id).count()
+        ds_count = db.query(ConversationDataset).filter(ConversationDataset.conversation_id == c.id).count()
+        ctx = json.loads(c.active_context_json or "{}")
+        output.append({
+            "id": c.id,
+            "title": c.title,
+            "state_revision": c.state_revision,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+            "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+            "message_count": msg_count,
+            "dataset_count": ds_count,
+            "pending_task": ctx.get("pending_task")
+        })
+    return output
+
+
+@router.post("/conversations")
+async def create_conversation(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    Creates a new persistent conversation identity.
+    Avoids duplicate creation if client passes an existing conversation_id.
+    """
+    data, _ = await parse_request_data_and_files(request)
+    conv_id = data.get("id") or data.get("conversation_id") or str(uuid.uuid4())
+    title = data.get("title") or "New Analysis Conversation"
+    conv = ConversationEngine.get_or_create_conversation(db, conversation_id=conv_id, title=title)
+    return {
+        "id": conv.id,
+        "title": conv.title,
+        "state_revision": conv.state_revision,
+        "created_at": conv.created_at.isoformat() if conv.created_at else None,
+        "updated_at": conv.updated_at.isoformat() if conv.updated_at else None,
+        "messages": [],
+        "active_context": json.loads(conv.active_context_json or "{}"),
+        "pending_task": None
+    }
+
+
+@router.get("/conversations/{conversation_id}")
+def get_conversation_snapshot(
+    conversation_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Returns the canonical snapshot of a conversation:
+    Persisted messages, dataset associations, active analytical context,
+    pending comparison tasks, and durable map state.
+    """
+    conv = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conv:
+        raise HTTPException(status_code=404, detail=f"Conversation '{conversation_id}' not found.")
+
+    messages = db.query(ConversationMessage).filter(
+        ConversationMessage.conversation_id == conversation_id
+    ).order_by(ConversationMessage.created_at.asc()).all()
+
+    datasets = db.query(ConversationDataset).filter(
+        ConversationDataset.conversation_id == conversation_id
+    ).order_by(ConversationDataset.created_at.asc()).all()
+
+    active_context = json.loads(conv.active_context_json or "{}")
+
+    formatted_messages = []
+    for m in messages:
+        meta = json.loads(m.metadata_json or "{}") if m.metadata_json else {}
+        formatted_messages.append({
+            "id": m.id,
+            "conversation_id": m.conversation_id,
+            "turn_id": m.turn_id,
+            "role": m.role,
+            "content": m.content,
+            "client_request_id": m.client_request_id,
+            "created_at": m.created_at.isoformat() if m.created_at else None,
+            "metadata": meta,
+            "summary": meta.get("summary") or (m.content if m.role == "assistant" else None),
+            "findings": meta.get("findings", []),
+            "sections": meta.get("sections", {}),
+            "model": meta.get("model", ""),
+            "maskUrl": meta.get("maskUrl"),
+            "mapAction": meta.get("mapAction"),
+            "validation": meta.get("validation", "passed")
+        })
+
+    formatted_datasets = []
+    for d in datasets:
+        formatted_datasets.append({
+            "id": d.id,
+            "file_name": d.file_name,
+            "file_path": d.file_path,
+            "role": d.role,
+            "file_size": d.file_size,
+            "mime_type": d.mime_type,
+            "acquisition_date": d.acquisition_date.isoformat() if d.acquisition_date else None,
+            "created_at": d.created_at.isoformat() if d.created_at else None
+        })
+
+    return {
+        "conversation": {
+            "id": conv.id,
+            "title": conv.title,
+            "state_revision": conv.state_revision,
+            "created_at": conv.created_at.isoformat() if conv.created_at else None,
+            "updated_at": conv.updated_at.isoformat() if conv.updated_at else None,
+        },
+        "messages": formatted_messages,
+        "datasets": formatted_datasets,
+        "active_context": active_context,
+        "pending_task": active_context.get("pending_task"),
+        "latest_map_action": active_context.get("map_state")
+    }
+
+
+@router.delete("/conversations/{conversation_id}")
+def delete_conversation(
+    conversation_id: str,
+    db: Session = Depends(get_db)
+):
+    """Deletes conversation and associated database entities."""
+    conv = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found.")
+
+    db.query(ConversationMessage).filter(ConversationMessage.conversation_id == conversation_id).delete()
+    db.query(ConversationTurn).filter(ConversationTurn.conversation_id == conversation_id).delete()
+    db.query(ConversationResult).filter(ConversationResult.conversation_id == conversation_id).delete()
+    db.query(ConversationDataset).filter(ConversationDataset.conversation_id == conversation_id).delete()
+    db.delete(conv)
+    db.commit()
+    return {"deleted": True, "conversation_id": conversation_id}
+
+
+@router.post("/conversations/{conversation_id}/messages")
+async def execute_conversation_turn(
+    conversation_id: str,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    Executes a multi-turn analytical step in the persistent conversation.
+    Supports both JSON and multipart form data with file uploads.
+    Enforces idempotency, context reuse, lineage tracking, and honest spatial verification.
+    """
+    data, uploaded_files = await parse_request_data_and_files(request)
+
+    prompt = (
+        data.get("prompt") or
+        data.get("content") or
+        data.get("message") or
+        data.get("query") or
+        ""
+    ).strip()
+
+    client_request_id = data.get("client_request_id") or str(uuid.uuid4())
+    conv = ConversationEngine.get_or_create_conversation(db, conversation_id=conversation_id)
+
+    # 1. Idempotency Check (Invariant 7 & Section 21)
+    existing_turn = db.query(ConversationTurn).filter(
+        ConversationTurn.conversation_id == conversation_id,
+        ConversationTurn.client_request_id == client_request_id
+    ).first()
+
+    if existing_turn:
+        # Check if client attempted to reuse client_request_id with a different payload
+        existing_user_msg = db.query(ConversationMessage).filter(
+            ConversationMessage.conversation_id == conversation_id,
+            ConversationMessage.client_request_id == client_request_id,
+            ConversationMessage.role == "user"
+        ).first()
+        if existing_user_msg and existing_user_msg.content.strip() != prompt:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Conflict: client_request_id '{client_request_id}' was already submitted with a different payload."
+            )
+
+        # If completed, return existing assistant message and state
+        existing_asst_msg = db.query(ConversationMessage).filter(
+            ConversationMessage.conversation_id == conversation_id,
+            ConversationMessage.turn_id == existing_turn.id,
+            ConversationMessage.role == "assistant"
+        ).first()
+        if existing_asst_msg:
+            meta = json.loads(existing_asst_msg.metadata_json or "{}")
+            return {
+                "conversation_id": conversation_id,
+                "turn_id": existing_turn.id,
+                "client_request_id": client_request_id,
+                "state_revision": conv.state_revision,
+                "user_message": {
+                    "id": existing_user_msg.id if existing_user_msg else None,
+                    "role": "user",
+                    "content": existing_user_msg.content if existing_user_msg else prompt,
+                    "created_at": existing_user_msg.created_at.isoformat() if existing_user_msg and existing_user_msg.created_at else None
+                },
+                "assistant_message": {
+                    "id": existing_asst_msg.id,
+                    "role": "assistant",
+                    "content": existing_asst_msg.content,
+                    "metadata": meta,
+                    "created_at": existing_asst_msg.created_at.isoformat() if existing_asst_msg.created_at else None
+                },
+                "summary": meta.get("summary") or existing_asst_msg.content,
+                "findings": meta.get("findings", []),
+                "sections": meta.get("sections", {}),
+                "model": meta.get("model", ""),
+                "maskUrl": meta.get("maskUrl"),
+                "mapAction": meta.get("mapAction"),
+                "pending_task": meta.get("pending_task"),
+                "active_context": json.loads(conv.active_context_json or "{}"),
+            }
+
+    # 1b. Concurrency Policy (Section 22): reject overlapping submissions for the same conversation
+    running_turn = db.query(ConversationTurn).filter(
+        ConversationTurn.conversation_id == conversation_id,
+        ConversationTurn.status == "RUNNING"
+    ).first()
+    if running_turn and running_turn.client_request_id != client_request_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Another analysis turn is currently in progress for this conversation. Please wait for it to complete or retry shortly."
+        )
+
+    # 2. Persist uploaded files as ConversationDataset records
+    active_context = json.loads(conv.active_context_json or "{}")
+    existing_datasets = db.query(ConversationDataset).filter(
+        ConversationDataset.conversation_id == conversation_id
+    ).order_by(ConversationDataset.created_at.asc()).all()
+
+    new_dataset_ids = []
+    has_pending = bool(active_context.get("pending_task"))
+
+    for p in uploaded_files:
+        p_name = os.path.basename(p)
+        # Determine dataset role
+        if existing_datasets or has_pending:
+            role = "comparison_input"
+        else:
+            role = "original"
+
+        ds = ConversationDataset(
+            id=str(uuid.uuid4()),
+            conversation_id=conversation_id,
+            file_path=p,
+            file_name=p_name,
+            file_size=os.path.getsize(p) if os.path.exists(p) else 0,
+            mime_type="image/tiff" if p.lower().endswith((".tif", ".tiff")) else "image/jpeg",
+            role=role,
+            metadata_json=json.dumps({"upload_turn_client_id": client_request_id})
+        )
+        db.add(ds)
+        db.commit()
+        db.refresh(ds)
+        new_dataset_ids.append(ds.id)
+        existing_datasets.append(ds)
+
+    # 3. Resolve file paths for execution
+    if uploaded_files:
+        exec_files = uploaded_files
+    else:
+        # Ordinary follow-up: reuse the existing conversation datasets!
+        exec_files = [ds.file_path for ds in existing_datasets if os.path.exists(ds.file_path)]
+
+    # 4. Persist User Message and Create Turn
+    turn_id = str(uuid.uuid4())
+    user_msg_id = str(uuid.uuid4())
+
+    user_msg = ConversationMessage(
+        id=user_msg_id,
+        conversation_id=conversation_id,
+        turn_id=turn_id,
+        role="user",
+        content=prompt or ("Attached files for analysis" if uploaded_files else ""),
+        client_request_id=client_request_id,
+        metadata_json=json.dumps({"has_attachments": bool(uploaded_files), "files": [os.path.basename(f) for f in exec_files]})
+    )
+    db.add(user_msg)
+
+    turn = ConversationTurn(
+        id=turn_id,
+        conversation_id=conversation_id,
+        client_request_id=client_request_id,
+        status="RUNNING",
+        attempt=1
+    )
+    db.add(turn)
+    db.commit()
+
+    # 5. Execute via LangGraph Task Router
+    try:
+        last_op = active_context.get("last_operation") or {}
+        task = data.get("task") or last_op.get("type") or "internvl"
+        target_model = data.get("model", "")
+
+        has_geotiff = any(p.lower().endswith((".tif", ".tiff")) for p in exec_files)
+        input_cat = "geotiff" if has_geotiff else ("benchmark" if exec_files else "query")
+
+        state_input = {
+            "conversation_id": conversation_id,
+            "client_request_id": client_request_id,
+            "task": task,
+            "input_category": input_cat,
+            "file_paths": exec_files,
+            "has_new_files": bool(uploaded_files),
+            "prompt": prompt,
+            "pair_type": "bitemporal" if len(exec_files) >= 2 else "single_image",
+            "target_model_id": target_model,
+            "validation_info": {},
+            "dispatch_mode": "worker",
+            "active_context": active_context,
+            "pending_task": active_context.get("pending_task"),
+            "result": {}
+        }
+
+        routed = task_router_app.invoke(state_input)
+        turn_action = routed.get("turn_action_type", "new_analysis")
+        routed_result = routed.get("result", {})
+        map_action = routed.get("map_action") or routed_result.get("map_action")
+        model_id = routed.get("target_model_id", target_model or "Task Router")
+
+        # If lightweight action executed, result is already directly available in routed_result
+        if turn_action in ("saved_fact", "map_action", "explanation", "parameter_modification", "spatial_proximity", "clarification"):
+            formatted_res = {
+                "summary": routed_result.get("summary", ""),
+                "findings": routed_result.get("findings", []),
+                "sections": routed_result.get("sections", {}),
+                "model": routed_result.get("model", model_id),
+                "validation": routed_result.get("validation", "passed"),
+                "maskUrl": routed_result.get("maskUrl"),
+                "mapAction": map_action,
+                "metrics": routed_result.get("metrics", {})
+            }
+        else:
+            # Scientific model pipeline ran
+            fallback_params = {
+                "file_paths": exec_files,
+                "prompt": prompt,
+                "pair_type": "bitemporal" if len(exec_files) >= 2 else "single_image",
+                "task": task,
+                "diagnostic_override": target_model or None
+            }
+            formatted_res = await poll_job_or_format(routed_result, model_id, fallback_params=fallback_params)
+
+        summary = formatted_res.get("summary", "")
+        findings = formatted_res.get("findings", [])
+        sections = formatted_res.get("sections", {})
+        mask_url = formatted_res.get("maskUrl")
+        metrics = formatted_res.get("metrics", {})
+
+        # 6. Result Lineage & Persistence
+        # If this turn produced analytical findings or a mask, record a ConversationResult
+        turn.turn_type = turn_action
+        if turn_action in ("new_analysis", "pending_input_continuation") and (findings or mask_url or summary):
+            is_first = active_context.get("original_result_id") is None
+            result_role = "original" if is_first else "derived"
+            parent_id = None if is_first else active_context.get("current_result_id")
+
+            new_res_id = str(uuid.uuid4())
+            conv_result = ConversationResult(
+                id=new_res_id,
+                conversation_id=conversation_id,
+                turn_id=turn_id,
+                parent_result_id=parent_id,
+                result_role=result_role,
+                operation=task or "detection",
+                parameters_json=json.dumps({"prompt": prompt, "model": model_id}),
+                summary=summary,
+                findings_json=json.dumps(findings),
+                sections_json=json.dumps(sections),
+                metrics_json=json.dumps(metrics),
+                mask_url=mask_url,
+                source_dataset_ids_json=json.dumps([d.id for d in existing_datasets])
+            )
+            db.add(conv_result)
+            db.commit()
+
+            if is_first:
+                active_context["original_result_id"] = new_res_id
+            active_context["current_result_id"] = new_res_id
+            active_context["last_operation"] = {"type": task, "parameters": {"prompt": prompt, "model": model_id}}
+            turn.result_id = new_res_id
+
+            # Clear pending task if this fulfilled it
+            if turn_action == "pending_input_continuation":
+                active_context["pending_task"] = None
+
+        elif turn_action == "clarification":
+            active_context["pending_task"] = routed.get("pending_task") or routed_result.get("pending_task")
+        elif turn_action in ("parameter_modification", "saved_fact", "map_action", "spatial_proximity"):
+            if routed_result.get("result_id"):
+                turn.result_id = routed_result.get("result_id")
+
+        # Update map action if issued
+        if map_action:
+            active_context["map_state"] = map_action
+
+        # Update deterministic title on first meaningful query
+        if conv.title in ("New Analysis Conversation", "New Analysis") and prompt:
+            clean_title = re.sub(r'[\r\n\t]+', ' ', prompt).strip()
+            conv.title = (clean_title[:38] + "...") if len(clean_title) > 40 else clean_title
+
+        # Increment analytical state revision
+        conv.state_revision += 1
+        conv.active_context_json = json.dumps(active_context)
+        turn.status = "COMPLETED"
+        turn.completed_at = datetime.now(timezone.utc)
+
+        # 7. Persist Assistant Message
+        asst_msg_id = str(uuid.uuid4())
+        msg_meta = {
+            "summary": summary,
+            "findings": findings,
+            "sections": sections,
+            "model": formatted_res.get("model", model_id),
+            "maskUrl": mask_url,
+            "mapAction": map_action,
+            "turn_action_type": turn_action,
+            "validation": formatted_res.get("validation", "passed"),
+            "pending_task": active_context.get("pending_task"),
+            "state_revision": conv.state_revision,
+            "metrics": metrics
+        }
+        asst_msg = ConversationMessage(
+            id=asst_msg_id,
+            conversation_id=conversation_id,
+            turn_id=turn_id,
+            role="assistant",
+            content=summary,
+            client_request_id=client_request_id,
+            metadata_json=json.dumps(msg_meta)
+        )
+        db.add(asst_msg)
+        db.commit()
+
+        return {
+            "conversation_id": conversation_id,
+            "turn_id": turn_id,
+            "client_request_id": client_request_id,
+            "state_revision": conv.state_revision,
+            "user_message": {
+                "id": user_msg_id,
+                "role": "user",
+                "content": user_msg.content,
+                "created_at": user_msg.created_at.isoformat() if user_msg.created_at else None
+            },
+            "assistant_message": {
+                "id": asst_msg_id,
+                "role": "assistant",
+                "content": asst_msg.content,
+                "metadata": msg_meta,
+                "created_at": asst_msg.created_at.isoformat() if asst_msg.created_at else None
+            },
+            "summary": summary,
+            "findings": findings,
+            "sections": sections,
+            "model": formatted_res.get("model", model_id),
+            "maskUrl": mask_url,
+            "mapAction": map_action,
+            "pending_task": active_context.get("pending_task"),
+            "active_context": active_context,
+            "validation": formatted_res.get("validation", "passed"),
+            "status": "COMPLETED"
+        }
+
+    except Exception as e:
+        logger.error(f"Error executing conversation turn for conversation {conversation_id}: {e}", exc_info=True)
+        turn.status = "FAILED"
+        turn.error_message = str(e)
+        turn.completed_at = datetime.now(timezone.utc)
+
+        # Invariant 9: "A failed turn does not erase the last valid analytical context."
+        # Safe error assistant message
+        safe_msg = f"An issue occurred while processing this turn: {str(e)}. Your previous analytical context remains preserved."
+        asst_msg_id = str(uuid.uuid4())
+        error_meta = {
+            "error": str(e),
+            "validation": "failed",
+            "turn_action_type": "error"
+        }
+        asst_msg = ConversationMessage(
+            id=asst_msg_id,
+            conversation_id=conversation_id,
+            turn_id=turn_id,
+            role="assistant",
+            content=safe_msg,
+            client_request_id=client_request_id,
+            metadata_json=json.dumps(error_meta)
+        )
+        db.add(asst_msg)
+        db.commit()
+
+        return {
+            "conversation_id": conversation_id,
+            "turn_id": turn_id,
+            "client_request_id": client_request_id,
+            "state_revision": conv.state_revision,
+            "user_message": {
+                "id": user_msg_id,
+                "role": "user",
+                "content": user_msg.content,
+                "created_at": user_msg.created_at.isoformat() if user_msg.created_at else None
+            },
+            "assistant_message": {
+                "id": asst_msg_id,
+                "role": "assistant",
+                "content": safe_msg,
+                "metadata": error_meta,
+                "created_at": asst_msg.created_at.isoformat() if asst_msg.created_at else None
+            },
+            "summary": safe_msg,
+            "findings": [],
+            "sections": {},
+            "model": "Error Recovery",
+            "maskUrl": None,
+            "mapAction": None,
+            "pending_task": active_context.get("pending_task"),
+            "active_context": active_context,
+            "status": "FAILED"
+        }
+

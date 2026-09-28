@@ -52,6 +52,22 @@ class PairManifest(BaseModel):
     quality_flags: List[str] = Field(default_factory=list)
 
 
+class AnalysisPlan(BaseModel):
+    """
+    Internal structured plan created before executing models to ensure query-grounded,
+    minimal-model execution (1-3 models max) and coordinated evidence generation.
+    """
+    intent: str
+    target_focus: str = "general"  # "buildings", "vegetation", "flood", "water", "urban", "metadata", "general"
+    inputs: List[str] = Field(default_factory=list)
+    is_temporal: bool = False
+    is_multimodal: bool = False
+    operations: List[str] = Field(default_factory=list)
+    required_models: List[str] = Field(default_factory=list)  # 1-3 models max: e.g. ["owlv2"], ["upernet"], ["changeformer"]
+    output_requirements: List[str] = Field(default_factory=list)
+    summary_goal: str = ""
+
+
 class TaskRequest(BaseModel):
     """
     Parsed scientific intent from the user query and inputs.
@@ -66,6 +82,7 @@ class TaskRequest(BaseModel):
     model_capability_required: Optional[str] = None
     requested_measurements: List[str] = Field(default_factory=list)
     diagnostic_model_override: Optional[str] = None  # Only for diagnostic testing
+    analysis_plan: Optional[AnalysisPlan] = None
 
 
 class RouteDecision(BaseModel):

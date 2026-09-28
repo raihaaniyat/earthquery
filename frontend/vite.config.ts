@@ -18,6 +18,12 @@ export default defineConfig({
       '/health': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
+      },
+      // Direct /conversations proxy fallback
+      '/conversations': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/conversations/, '/api/conversations')
       }
     }
   }

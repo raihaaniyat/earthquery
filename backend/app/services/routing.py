@@ -13,7 +13,8 @@ from backend.app.schemas.manifests import (
     SceneManifest,
     PairManifest,
     TaskRequest,
-    RouteDecision
+    RouteDecision,
+    AnalysisPlan
 )
 from backend.app.models_registry import REGISTRY, ModelStatus
 
@@ -164,47 +165,148 @@ def parse_user_intent(
 ) -> TaskRequest:
     """
     Parses user scientific intent from query keywords and input modalities.
+    Constructs an explicit AnalysisPlan guaranteeing minimal model execution (1-3 models max)
+    and deterministic raster tool precedence where appropriate.
     """
     q_lower = query.lower().strip()
     scene_ids = [m.scene_id for m in manifests]
+    is_temporal = bool(pair and pair.purpose == "temporal") or len(manifests) >= 2
+    is_optical_sar = bool(pair and pair.purpose == "optical_sar") or (
+        len(manifests) >= 2 and any(m.modality == "sar" for m in manifests) and any(m.modality == "optical" for m in manifests)
+    )
 
-    intent = "scene_description"
-    requested_measurements = []
-    output_type = "narrative"
+    requested_measurements: List[str] = []
+    output_type: str = "narrative"
 
-    # Spectral indices intent
-    if any(k in q_lower for k in ["ndvi", "vegetation index", "ndwi", "water index", "greenness", "spectral"]):
-        intent = "spectral_index"
-        requested_measurements = ["ndvi"]
+    # 1. Pure Raster Metadata Query (No vision models needed)
+    if any(k in q_lower for k in [
+        "area of the raster", "area of the image", "area of the uploaded", "what is the area",
+        "footprint of", "what is the crs", "coordinate system", "pixel resolution", "ground sampling distance",
+        "raster bounds", "spatial extent of"
+    ]) and not any(k in q_lower for k in ["change", "building", "vegetation", "flood", "new", "compare"]):
+        intent = "raster_metadata"
+        target_focus = "metadata"
+        required_models = []
+        operations = ["raster_metadata_extraction", "geodesic_area_calculation"]
         output_type = "metrics"
+        requested_measurements = ["footprint_km2", "resolution_m", "crs"]
+        summary_goal = "Directly report verified GeoTIFF metadata, physical footprint area, and coordinate system."
 
-    # Change detection intent
-    elif any(k in q_lower for k in ["change", "difference", "compare", "deforestation", "construction", "disaster"]) and (pair or len(manifests) >= 2):
-        intent = "change_detection"
-        requested_measurements = ["bitemporal_difference", "changed_area_km2"]
-        output_type = "mask"
+    # 2. Spectral Indices Intent (Deterministic, no GPU model needed)
+    elif any(k in q_lower for k in ["ndvi", "vegetation index", "ndwi", "water index", "greenness", "spectral"]):
+        intent = "spectral_index"
+        target_focus = "vegetation" if "ndvi" in q_lower or "greenness" in q_lower else "water"
+        required_models = []
+        operations = ["spectral_band_extraction", "deterministic_index_ratio", "histogram_thresholding"]
+        output_type = "metrics"
+        requested_measurements = ["ndvi"]
+        summary_goal = "Deterministic spectral index computation with histogram distribution and threshold exceedance."
 
-    # General scene description / visual questioning (takes precedence over generic 'find' words)
-    elif any(k in q_lower for k in ["what is", "image type", "what does", "what have", "what are", "describe", "explain", "scene type"]):
-        intent = "scene_description"
-        output_type = "narrative"
+    # 3. Temporal Comparison Queries
+    elif (is_temporal or any(k in q_lower for k in ["compare", "change", "difference", "between the two", "two images", "earlier", "later"])) and len(manifests) >= 2:
+        is_temporal = True
+        # 3a. Temporal Building Change / Construction
+        if any(b in q_lower for b in ["building", "structure", "house", "construction", "built-up", "urban development", "expansion"]):
+            intent = "temporal_building_change"
+            target_focus = "buildings"
+            required_models = ["owlv2"]
+            operations = ["spatial_alignment", "temporal_comparison", "bitemporal_object_detection", "spatial_object_matching", "statistics"]
+            output_type = "mask"
+            requested_measurements = ["new_building_count", "unchanged_building_count", "disappeared_building_count"]
+            summary_goal = "Compare aligned temporal observations, match spatial building objects, and report newly appeared vs unchanged structures."
 
-    # Visual grounding intent (explicit object localization)
-    elif any(k in q_lower for k in ["locate", "detect", "ground", "where are", "count", "bounding box", "owlv2", "owl", "geoground"]) or (
-        "find" in q_lower and any(obj in q_lower for obj in ["building", "vehicle", "ship", "car", "plane", "aircraft", "structure", "road"])
+        # 3b. Temporal Vegetation Loss / Deforestation
+        elif any(v in q_lower for v in ["vegetation", "forest", "tree", "greenery", "deforestation", "canopy"]):
+            intent = "temporal_vegetation_loss"
+            target_focus = "vegetation"
+            required_models = []  # Deterministic aligned vegetation delta
+            operations = ["spatial_alignment", "bitemporal_vegetation_delta", "loss_quantification", "statistics"]
+            output_type = "metrics"
+            requested_measurements = ["lost_vegetation_area_km2", "loss_pct_of_baseline"]
+            summary_goal = "Calculate comparative vegetation loss and area change between spatially aligned temporal observations."
+
+        # 3c. General Temporal Change Detection
+        else:
+            intent = "change_detection"
+            target_focus = "general_change"
+            required_models = ["changeformer", "change_vqa"]
+            operations = ["spatial_alignment", "bitemporal_difference", "siamese_change_detection", "temporal_reasoning"]
+            output_type = "mask"
+            requested_measurements = ["bitemporal_difference", "changed_area_km2"]
+            summary_goal = "Spatially align observations to common footprint and synthesize comparative change dynamics."
+
+    # 4. Optical + SAR Multimodal Queries
+    elif is_optical_sar or (pair and pair.purpose == "optical_sar") or (
+        any(m in q_lower for m in ["sar", "radar"]) and any(m in q_lower for m in ["optical", "rgb", "multispectral", "both", "fusion"])
     ):
+        is_multimodal = True
+        if any(f in q_lower for f in ["flood", "water", "inundat", "overflow"]):
+            intent = "optical_sar_flood"
+            target_focus = "flood"
+            required_models = ["croma"]
+            operations = ["spatial_alignment", "optical_water_index", "sar_specular_thresholding", "cross_modal_consensus"]
+            output_type = "mask"
+            requested_measurements = ["fused_flood_area_km2", "fused_flood_pct"]
+            summary_goal = "Fuse optical spectral reflectance with SAR specular backscatter to delineate confirmed flood extent."
+        elif any(b in q_lower for b in ["building", "structure", "urban"]):
+            intent = "optical_sar_buildings"
+            target_focus = "buildings"
+            required_models = ["croma", "owlv2"]
+            operations = ["spatial_alignment", "optical_grounding", "sar_structural_double_bounce", "cross_modal_fusion"]
+            output_type = "mask"
+            requested_measurements = ["structure_pct"]
+            summary_goal = "Identify structural features via joint optical visual patterns and SAR corner backscatter."
+        else:
+            intent = "optical_sar_fusion"
+            target_focus = "general"
+            required_models = ["croma", "optical_sar_head"]
+            operations = ["spatial_alignment", "croma_cross_modal_features", "multimodal_classification"]
+            output_type = "narrative"
+            requested_measurements = ["multimodal_features"]
+            summary_goal = "Joint optical and SAR feature representation and cross-sensor surface classification."
+
+    # 5. Object Detection / Visual Grounding Intent
+    elif any(k in q_lower for k in ["locate", "detect", "ground", "where are", "count", "bounding box", "owlv2", "owl", "geoground"]) or (
+        "find" in q_lower and any(obj in q_lower for obj in ["building", "vehicle", "ship", "car", "plane", "aircraft", "structure", "road", "solar", "tank"])
+    ) or any(phrase in q_lower for phrase in ["how many buildings", "how many vehicles", "how many ships", "how many planes", "how many structures"]):
         intent = "visual_grounding"
+        target_focus = "objects"
+        required_models = ["owlv2"]
+        operations = ["zero_shot_localization", "bounding_box_extraction", "spatial_coordinates"]
         output_type = "mask"
+        requested_measurements = ["object_count"]
+        summary_goal = "Detect, localize, and count target physical features using open-vocabulary visual grounding."
 
-    # Classification / segmentation intent
-    elif any(k in q_lower for k in ["classify", "land cover", "segment", "segmentation", "classes"]):
+    # 6. Classification / Land Cover Segmentation Intent
+    elif any(k in q_lower for k in ["classify", "land cover", "segment", "segmentation", "classes", "vegetation, water", "land-cover"]):
         intent = "classification"
+        target_focus = "land_cover"
+        required_models = ["upernet"]
+        operations = ["semantic_segmentation", "class_percentage_distribution"]
         output_type = "mask"
+        requested_measurements = ["class_distribution"]
+        summary_goal = "Segment and quantify surface land cover categories."
 
-    # Optical + SAR fusion intent
-    elif pair and pair.purpose == "optical_sar":
-        intent = "optical_sar_fusion"
-        requested_measurements = ["multimodal_features"]
+    # 7. Scene Description / General VQA Intent
+    else:
+        intent = "scene_description"
+        target_focus = "general"
+        required_models = ["internvl3"]
+        operations = ["visual_question_answering", "radiometric_context", "scene_interpretation"]
+        output_type = "narrative"
+        summary_goal = "Provide expert remote sensing interpretation answering the specific inquiry."
+
+    plan = AnalysisPlan(
+        intent=intent,
+        target_focus=target_focus,
+        inputs=scene_ids,
+        is_temporal=is_temporal,
+        is_multimodal=is_optical_sar,
+        operations=operations,
+        required_models=required_models,
+        output_requirements=requested_measurements + [output_type],
+        summary_goal=summary_goal
+    )
 
     return TaskRequest(
         user_question=query,
@@ -212,7 +314,8 @@ def parse_user_intent(
         scene_ids=scene_ids,
         requested_output=output_type,
         requested_measurements=requested_measurements,
-        diagnostic_model_override=diagnostic_override
+        diagnostic_model_override=diagnostic_override,
+        analysis_plan=plan
     )
 
 
@@ -252,7 +355,23 @@ def decide_route(
                 decision_reason=f"Diagnostic model override requested: {override}"
             )
 
-    # 1. Deterministic Spectral Index Route (No GPU model required)
+    # 1. Deterministic Raster Metadata Route (Zero models needed)
+    if intent == "raster_metadata":
+        return RouteDecision(
+            task="raster_metadata",
+            selected_adapter_or_none=None,
+            preprocessing_profile="geotiff_header_inspection",
+            validation_checks={"metadata_verified": True},
+            blocked_reasons=[],
+            fallback_measurements=["footprint_km2", "resolution_m", "crs"],
+            capabilities_version="2.0.0",
+            model_version="deterministic_raster_v1",
+            estimated_resources={"vram_mb": 0, "cpu_only": True},
+            automatic_route=True,
+            decision_reason="Pure deterministic GeoTIFF header and spatial extent inspection. No vision models required."
+        )
+
+    # 2. Deterministic Spectral Index Route (No GPU model required)
     if intent == "spectral_index":
         if not manifests:
             blocked_reasons.append("No scene provided for spectral index computation.")
@@ -273,10 +392,38 @@ def decide_route(
                 decision_reason="Deterministic spectral index calculation (NDVI/NDWI) with exact raster calibration and histogram statistics."
             )
 
-    # 2. Bitemporal Change Detection Route
-    if intent == "change_detection":
+    # 3. Temporal Routes
+    if intent in ("change_detection", "temporal_building_change", "temporal_vegetation_loss"):
         if not pair and len(manifests) < 2:
             blocked_reasons.append("Change detection requires two registered acquisitions (before and after).")
+        elif intent == "temporal_vegetation_loss":
+            return RouteDecision(
+                task="temporal_vegetation_loss",
+                selected_adapter_or_none=None,  # Pure deterministic vegetation difference
+                preprocessing_profile="bitemporal_aligned_vegetation",
+                validation_checks={"pair_validated": True},
+                blocked_reasons=[],
+                fallback_measurements=["lost_vegetation_area_km2", "loss_pct_of_baseline"],
+                capabilities_version="2.0.0",
+                model_version="deterministic_diff_v1",
+                estimated_resources={"vram_mb": 0, "cpu_only": True},
+                automatic_route=True,
+                decision_reason="Deterministic aligned NDVI difference quantifying baseline vegetation versus post-event loss."
+            )
+        elif intent == "temporal_building_change":
+            return RouteDecision(
+                task="temporal_building_change",
+                selected_adapter_or_none="owlv2",
+                preprocessing_profile="bitemporal_object_matching",
+                validation_checks={"pair_validated": True, "spatial_matching": True},
+                blocked_reasons=[],
+                fallback_measurements=["new_building_count", "unchanged_building_count"],
+                capabilities_version="2.0.0",
+                model_version="google/owlv2-base-patch16-ensemble",
+                estimated_resources={"vram_mb": 1860},
+                automatic_route=True,
+                decision_reason="OWLv2 visual grounding on temporal pair with spatial bipartite IoU matching to separate unchanged from newly constructed objects."
+            )
         else:
             # Check ChangeFormer availability
             cf_desc = REGISTRY.get("changeformer")
@@ -310,12 +457,12 @@ def decide_route(
                     decision_reason="Deterministic signed difference on aligned acquisitions with equal-area changed percentage."
                 )
 
-    # 3. Optical + SAR Fusion Route (CROMA)
-    if intent == "optical_sar_fusion" or (pair and pair.purpose == "optical_sar"):
+    # 4. Optical + SAR Fusion Routes
+    if intent in ("optical_sar_fusion", "optical_sar_flood", "optical_sar_buildings") or (pair and pair.purpose == "optical_sar"):
         croma_desc = REGISTRY.get("croma")
         if croma_desc and croma_desc.status == ModelStatus.VERIFIED:
             return RouteDecision(
-                task="feature_extraction",
+                task=intent,
                 selected_adapter_or_none="croma",
                 preprocessing_profile="croma_dual_sensor",
                 validation_checks={"optical_sar_pair": True},
@@ -325,12 +472,12 @@ def decide_route(
                 model_version="CROMA-Base",
                 estimated_resources={"vram_mb": 2560},
                 automatic_route=True,
-                decision_reason="CROMA-Base dual-backbone optical/SAR joint feature representation."
+                decision_reason="CROMA-Base dual-backbone optical/SAR joint feature representation with cross-modal evidence fusion."
             )
         else:
             blocked_reasons.append("CROMA-Base model unavailable.")
 
-    # 4. Visual Grounding Route
+    # 5. Visual Grounding Route
     if intent == "visual_grounding":
         gg_desc = REGISTRY.get("owlv2") or REGISTRY.get("geoground")
         if gg_desc and gg_desc.status == ModelStatus.VERIFIED:
@@ -350,7 +497,7 @@ def decide_route(
         else:
             blocked_reasons.append("GeoGround-7B is unavailable on 8 GB GPU; open-vocabulary grounding requires tested OWLv2 adapter.")
 
-    # 5. Semantic Classification Route (UPerNet)
+    # 6. Semantic Classification Route (UPerNet)
     if intent == "classification":
         up_desc = REGISTRY.get("upernet")
         if up_desc and up_desc.status == ModelStatus.VERIFIED:
@@ -368,7 +515,7 @@ def decide_route(
                 decision_reason="UPerNet ConvNeXt semantic segmentation for land-cover classification."
             )
 
-    # 6. Default: Optical Scene Description & VQA (InternVL3-2B)
+    # 7. Default: Optical Scene Description & VQA (InternVL3-2B)
     ivl_desc = REGISTRY.get("internvl3")
     if ivl_desc and ivl_desc.status == ModelStatus.VERIFIED:
         is_geo = bool(manifests and manifests[0].georeferencing_mode in ("projected", "geographic"))

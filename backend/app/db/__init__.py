@@ -8,7 +8,8 @@ from backend.app.db.models import (
     User, ApiToken, Project, ProjectMember, Scene, Asset, SceneQuality,
     ScenePair, DatasetVersion, ModelVersion, AnalysisJob, JobInput,
     ExecutionStep, ExecutionStepAsset, Finding, FindingEvidence, Report,
-    OutboxEvent, JobEvent, ExternalDataSource, ExternalMapLayer, ExternalContextRecord
+    OutboxEvent, JobEvent, ExternalDataSource, ExternalMapLayer, ExternalContextRecord,
+    Conversation, ConversationMessage, ConversationTurn, ConversationDataset, ConversationResult
 )
 
 __all__ = [
@@ -40,5 +41,10 @@ __all__ = [
     "ExternalDataSource",
     "ExternalMapLayer",
     "ExternalContextRecord",
+    "Conversation",
+    "ConversationMessage",
+    "ConversationTurn",
+    "ConversationDataset",
+    "ConversationResult",
 ]
 

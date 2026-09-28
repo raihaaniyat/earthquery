@@ -14,14 +14,16 @@ from backend.app.db.models import (
 )
 
 def test_metadata_contains_all_entities():
-    """Verify that all 22 entities are present in Base.metadata."""
+    """Verify that all 27 entities are present in Base.metadata."""
     table_names = set(Base.metadata.tables.keys())
     expected = {
         'users', 'api_tokens', 'projects', 'project_members', 'scenes', 'assets',
         'scene_quality', 'scene_pairs', 'dataset_versions', 'model_versions',
         'analysis_jobs', 'job_inputs', 'execution_steps', 'execution_step_assets',
         'findings', 'finding_evidence', 'reports', 'outbox_events', 'job_events',
-        'external_data_sources', 'external_map_layers', 'external_context_records'
+        'external_data_sources', 'external_map_layers', 'external_context_records',
+        'conversations', 'conversation_messages', 'conversation_turns',
+        'conversation_datasets', 'conversation_results'
     }
     missing = expected - table_names
     assert not missing, f"Missing tables in metadata: {missing}"

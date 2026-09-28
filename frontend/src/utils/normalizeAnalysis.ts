@@ -369,19 +369,36 @@ export function normalizeAnalysisResponse(
   }
 
   // Also check metadata section if raster section is sparse
-  if (!crsStr && metadataText) {
-    const crsMatch = metadataText.match(/Coordinate Reference System:\s*([^\n\r]+)/i);
-    if (crsMatch) crsStr = crsMatch[1].trim();
-    const resMatch = metadataText.match(/Ground Resolution:\s*([\d.]+)\s*m/i);
-    if (resMatch) resolutionM = parseFloat(resMatch[1]);
-    const footMatch = metadataText.match(/Scene Footprint:\s*([\d.]+)\s*km/i);
-    if (footMatch) footprintKm2 = parseFloat(footMatch[1]);
+  if (metadataText) {
+    if (!crsStr) {
+      const crsMatch = metadataText.match(/Coordinate Reference System:\s*([^\n\r]+)/i);
+      if (crsMatch) crsStr = crsMatch[1].trim();
+    }
+    if (resolutionM == null) {
+      const resMatch = metadataText.match(/Ground Resolution:\s*([\d.]+)\s*m/i);
+      if (resMatch) resolutionM = parseFloat(resMatch[1]);
+    }
+    if (footprintKm2 == null) {
+      const footMatch = metadataText.match(/Scene Footprint:\s*([\d.]+)\s*km/i);
+      if (footMatch) footprintKm2 = parseFloat(footMatch[1]);
+    }
+    if (radiometryMean == null) {
+      const minMatch = metadataText.match(/Min\s*([\d.]+)/i);
+      const maxMatch = metadataText.match(/Max\s*([\d.]+)/i);
+      const meanMatch = metadataText.match(/Mean\s*([\d.]+)/i);
+      const validMatch = metadataText.match(/Valid Pixels:\s*([\d.]+)%/i);
+      if (minMatch) radiometryMin = parseFloat(minMatch[1]);
+      if (maxMatch) radiometryMax = parseFloat(maxMatch[1]);
+      if (meanMatch) radiometryMean = parseFloat(meanMatch[1]);
+      if (validMatch) radiometryValidPct = parseFloat(validMatch[1]);
+    }
   }
 
   // 7. Limitations / Warnings
   const limitations: Array<{ source: string; warning: string; impact?: string }> = [];
   const reviewItems = sections.interpretation_requiring_review || [];
   for (const item of reviewItems) {
+    if (item.toLowerCase().includes('no independent field reference data supplied')) continue;
     limitations.push({
       source: 'Scientific Review Engine',
       warning: item,
@@ -393,12 +410,18 @@ export function normalizeAnalysisResponse(
     const parsedLim = parseBulletItems(limitationsText);
     if (parsedLim.length) {
       for (const pl of parsedLim) {
+        if (
+          pl.name.toLowerCase().includes('no independent field reference data supplied') ||
+          (pl.description && pl.description.toLowerCase().includes('no independent field reference data supplied'))
+        ) {
+          continue;
+        }
         limitations.push({
           source: 'Model Diagnostic',
           warning: pl.name + (pl.description ? `: ${pl.description}` : '')
         });
       }
-    } else {
+    } else if (!limitationsText.toLowerCase().includes('no independent field reference data supplied')) {
       limitations.push({
         source: 'Model Diagnostic',
         warning: limitationsText
@@ -493,7 +516,7 @@ export function normalizeAnalysisResponse(
         role: 'Semantic Segmentation',
         analysisType: 'Land-Cover / Surface Segmentation',
         classes: segmentedClasses,
-        maskUrl: maskUrl && maskUrl.includes('segmentation') ? maskUrl : undefined,
+        maskUrl: (context?.task === 'segmentation') && maskUrl && maskUrl.includes('segmentation') ? maskUrl : undefined,
         evidenceNote: upernetEvidenceNote || undefined
       },
       owlv2: {
@@ -510,7 +533,7 @@ export function normalizeAnalysisResponse(
       }
     },
     raster: {
-      available: Boolean(crsStr || rasterRawItems.length),
+      available: Boolean(crsStr || rasterRawItems.length || radiometryMean != null),
       crs: crsStr,
       resolutionM,
       footprintKm2,
@@ -540,13 +563,13 @@ export function normalizeAnalysisResponse(
         : 'No significant cross-model conflicts reported.'
     },
     metadata: {
-      task: context?.task || result.decision_reason || 'scene_description',
+      task: (metadataText && metadataText.match(/Task:\s*([^\n\r]+)/i)?.[1]?.trim()) || context?.task || result.decision_reason || 'scene_description',
       participatingModels,
       crs: crsStr,
       groundResolution: resolutionM ? `${resolutionM} m` : undefined,
       sceneFootprint: footprintKm2 ? `${footprintKm2} km²` : undefined,
       radiometry: radiometryMean != null ? `Min ${radiometryMin}, Max ${radiometryMax}, Mean ${radiometryMean}` : undefined,
-      executionTimeMs: result.metrics?.duration_ms ? `${result.metrics.duration_ms} ms` : undefined,
+      executionTimeMs: (result.metrics?.duration_ms ? `${result.metrics.duration_ms} ms` : undefined) || (metadataText && metadataText.match(/Execution Time:\s*([^\n\r]+)/i)?.[1]?.trim()) || undefined,
       decisionReason: result.decision_reason
     },
     limitations,
