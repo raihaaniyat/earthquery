@@ -29,7 +29,8 @@ env.bak/
 venv.bak/
 
 # Environment configuration
-!.env
+.env
+.env.*
 !.env.example
 
 # Large binary checkpoints & Weights (exceeding GitHub 100MB limit)
@@ -55,9 +56,9 @@ data/processed/
 data/benchmarks/
 storage/
 artifacts/logs/
+artifacts/backups/
 .pids.json
 /uploads/
-!storage/satquery-inputs/test/roundtrip.bin
 
 # Node / Frontend
 node_modules/
