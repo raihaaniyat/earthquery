@@ -67,7 +67,7 @@ class Settings(BaseSettings):
     MAX_UPLOAD_BYTES: int = 524288000       # 500 MB
     MIN_FREE_DISK_BYTES: int = 10737418240  # 10 GB
     MAX_VQA_TILES: int = 6
-    MAX_VQA_TOKENS: int = 1536
+    MAX_VQA_TOKENS: int = 512
 
     # 7. ISRO / NRSC External Providers (BHOONIDHI & Bhuvan)
     BHOONIDHI_USER_ID: Optional[str] = None
@@ -80,7 +80,6 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000"
     CUDNN_ENABLED: bool = False
     DEVICE: str = "cuda"
-    MAX_VRAM_GB: float = 8.0
 
 
     @property
