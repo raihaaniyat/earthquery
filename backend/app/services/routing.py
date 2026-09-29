@@ -281,8 +281,40 @@ def parse_user_intent(
         requested_measurements = ["ndvi"]
         summary_goal = "Deterministic spectral index computation with histogram distribution and threshold exceedance."
 
+    # 4. Optical + SAR Multimodal Queries (Placed before temporal comparison so multimodal phrasing like 'fusion between the two' is prioritized)
+    elif is_optical_sar or (pair and pair.purpose == "optical_sar") or any(m in q_lower for m in ["optical-sar", "optical_sar", "sar-optical", "croma"]) or (
+        any(m in q_lower for m in ["sar", "radar"]) and any(m in q_lower for m in ["optical", "rgb", "multispectral", "both", "fusion", "two", "between"])
+    ) or (
+        "fusion" in q_lower and any(m in q_lower for m in ["sar", "radar", "optical", "two", "between"])
+    ):
+        is_multimodal = True
+        if any(f in q_lower for f in ["flood", "water", "inundat", "overflow"]):
+            intent = "optical_sar_flood"
+            target_focus = "flood"
+            required_models = ["croma", "optical_sar_head", "change_vqa"]
+            operations = ["spatial_alignment", "optical_water_index", "sar_specular_thresholding", "cross_modal_consensus"]
+            output_type = "mask"
+            requested_measurements = ["fused_flood_area_km2", "fused_flood_pct"]
+            summary_goal = "Fuse optical spectral reflectance with SAR specular backscatter to delineate confirmed flood extent."
+        elif any(b in q_lower for b in ["building", "structure", "urban"]):
+            intent = "optical_sar_buildings"
+            target_focus = "buildings"
+            required_models = ["croma", "optical_sar_head", "owlv2"]
+            operations = ["spatial_alignment", "optical_grounding", "sar_structural_double_bounce", "cross_modal_fusion"]
+            output_type = "mask"
+            requested_measurements = ["structure_pct"]
+            summary_goal = "Identify structural features via joint optical visual patterns and SAR corner backscatter."
+        else:
+            intent = "optical_sar_fusion"
+            target_focus = "general"
+            required_models = ["croma", "optical_sar_head", "change_vqa"]
+            operations = ["spatial_alignment", "croma_cross_modal_features", "multimodal_classification", "cross_sensor_vqa"]
+            output_type = "narrative"
+            requested_measurements = ["multimodal_features", "primary_class", "change_vqa_answer"]
+            summary_goal = "Joint optical and SAR feature representation, cross-sensor surface classification, and multimodal reasoning."
+
     # 6. Temporal Comparison Queries (ONLY when query specifically asks about change or comparison)
-    elif len(manifests) >= 2 and (is_change_query or any(k in q_lower for k in ["compare", "difference", "earlier", "later", "what changed"])):
+    elif len(manifests) >= 2 and (is_change_query or any(k in q_lower for k in ["compare", "difference", "earlier", "later", "what changed", "two dates", "between", "lost"])):
         is_temporal = True
         # 6a. Temporal Building Change / Construction
         if any(b in q_lower for b in ["building", "structure", "house", "construction", "built-up", "urban development", "expansion"]):
@@ -313,36 +345,6 @@ def parse_user_intent(
             output_type = "mask"
             requested_measurements = ["bitemporal_difference", "changed_area_km2"]
             summary_goal = "Spatially align observations to common footprint and synthesize comparative change dynamics."
-
-    # 4. Optical + SAR Multimodal Queries
-    elif is_optical_sar or (pair and pair.purpose == "optical_sar") or (
-        any(m in q_lower for m in ["sar", "radar"]) and any(m in q_lower for m in ["optical", "rgb", "multispectral", "both", "fusion"])
-    ):
-        is_multimodal = True
-        if any(f in q_lower for f in ["flood", "water", "inundat", "overflow"]):
-            intent = "optical_sar_flood"
-            target_focus = "flood"
-            required_models = ["croma"]
-            operations = ["spatial_alignment", "optical_water_index", "sar_specular_thresholding", "cross_modal_consensus"]
-            output_type = "mask"
-            requested_measurements = ["fused_flood_area_km2", "fused_flood_pct"]
-            summary_goal = "Fuse optical spectral reflectance with SAR specular backscatter to delineate confirmed flood extent."
-        elif any(b in q_lower for b in ["building", "structure", "urban"]):
-            intent = "optical_sar_buildings"
-            target_focus = "buildings"
-            required_models = ["croma", "owlv2"]
-            operations = ["spatial_alignment", "optical_grounding", "sar_structural_double_bounce", "cross_modal_fusion"]
-            output_type = "mask"
-            requested_measurements = ["structure_pct"]
-            summary_goal = "Identify structural features via joint optical visual patterns and SAR corner backscatter."
-        else:
-            intent = "optical_sar_fusion"
-            target_focus = "general"
-            required_models = ["croma", "optical_sar_head"]
-            operations = ["spatial_alignment", "croma_cross_modal_features", "multimodal_classification"]
-            output_type = "narrative"
-            requested_measurements = ["multimodal_features"]
-            summary_goal = "Joint optical and SAR feature representation and cross-sensor surface classification."
 
     # 5. Object Detection / Visual Grounding Intent
     elif any(k in q_lower for k in ["locate", "detect", "ground", "where are", "count", "bounding box", "owlv2", "owl", "geoground"]) or (

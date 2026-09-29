@@ -607,22 +607,97 @@ def _compose_optical_sar_response(
     data: Dict[str, Any],
     constraints: Dict[str, Any]
 ) -> Tuple[str, List[str]]:
-    flood_pct = data.get("fused_flood_pct") or 0
+    flood_pct = data.get("fused_flood_pct")
     flood_km2 = data.get("fused_flood_area_km2")
     suppressed = data.get("suppressed_false_positives_px") or 0
-    area_str = f" ({flood_km2} km²)" if flood_km2 is not None else ""
+    structure_pct = data.get("structure_pct")
+    structure_km2 = data.get("structure_area_km2")
+    primary_class = data.get("optical_sar_primary_class")
+    class_conf = data.get("optical_sar_confidence")
+    vqa_answer = data.get("change_vqa_answer")
 
-    p1 = (
-        f"Joint cross-modal fusion of optical and Synthetic Aperture Radar (SAR) observations confirmed **{flood_pct}% surface inundation**{area_str} "
-        f"across the overlapping study area. SAR specular reflection (low backscatter response) directly corroborated optical water signatures "
-        f"while rejecting {suppressed} ambiguous pixels caused by cloud shadows and terrain contrast."
+    query_str = str(data.get("query", "")).lower()
+    is_flood_intent = (
+        data.get("focus") == "flood"
+        or any(w in query_str for w in ("flood", "inundat", "water", "lake", "river"))
+        or (flood_pct is not None and flood_pct > 1.0)
     )
-    supporting = [
-        f"Fused flood extent: {flood_pct}% of shared geographic area{area_str}.",
-        f"False positives eliminated by radar consensus: {suppressed} pixels.",
-        "Complementary sensors: Optical water spectral indices aligned with SAR specular reflection."
-    ]
-    return p1, supporting
+    is_structure_intent = (
+        data.get("focus") == "structural"
+        or any(w in query_str for w in ("build", "structur", "urban", "facil", "settle"))
+        or (structure_pct is not None and structure_pct > 1.0)
+    )
+
+    def _fmt_area(v: Any) -> str:
+        if v is None:
+            return ""
+        try:
+            fv = float(v)
+            if math.isnan(fv) or math.isinf(fv) or fv <= 0:
+                return ""
+            return f" ({round(fv, 3)} km²)"
+        except (ValueError, TypeError):
+            return ""
+
+    # Primary paragraph based on detected consensus and query intent
+    if is_flood_intent:
+        f_val = flood_pct if flood_pct is not None else 0.0
+        area_str = _fmt_area(flood_km2)
+        p1 = (
+            f"Joint cross-modal fusion of optical and Synthetic Aperture Radar (SAR) observations confirmed **{f_val}% surface inundation**{area_str} "
+            f"across the overlapping study area. SAR specular reflection (low backscatter response) directly corroborated optical water signatures "
+            f"while rejecting {suppressed} ambiguous pixels caused by cloud shadows and terrain contrast."
+        )
+    elif is_structure_intent and structure_pct is not None:
+        area_str = _fmt_area(structure_km2)
+        p1 = (
+            f"Joint cross-modal fusion of optical and Synthetic Aperture Radar (SAR) observations identified **{structure_pct}% structural & built environment coverage**{area_str} "
+            f"across the overlapping study area. Radar corner reflector double-bounce high backscatter directly reinforced optical structural contrast, "
+            f"providing robust building delineation independent of solar illumination or shadow ambiguities."
+        )
+    else:
+        p1 = (
+            "Joint cross-modal fusion of aligned Sentinel-1 SAR and Sentinel-2 optical imagery was successfully evaluated. "
+            "The fusion pipeline leveraged complementary sensor modalities—combining dielectric permittivity and surface roughness from radar "
+            "with multispectral surface reflectance from optical sensors to eliminate false positive artifacts and establish cross-sensor consensus."
+        )
+
+    extra_paras = []
+    if primary_class:
+        conf_str = f" with {round(class_conf * 100, 1)}% confidence" if class_conf else ""
+        extra_paras.append(
+            f"Cross-modal representation analysis via the Optical-SAR Head (CROMA ViT-B backbone) classified the dominant terrain as "
+            f"**{primary_class}**{conf_str}."
+        )
+    if vqa_answer:
+        extra_paras.append(
+            f"Cross-sensor visual question answering (Change VQA reasoning): {vqa_answer}"
+        )
+
+    full_answer = "\n\n".join([p1] + extra_paras) if extra_paras else p1
+
+    supporting = []
+    if flood_pct is not None and flood_pct > 1.0:
+        area_str = _fmt_area(flood_km2)
+        supporting.append(f"Fused flood extent: {flood_pct}% of shared geographic area{area_str}.")
+        supporting.append(f"False positives eliminated by radar consensus: {suppressed} pixels.")
+        supporting.append("Complementary sensors: Optical water spectral indices aligned with SAR specular reflection.")
+    elif structure_pct is not None and structure_pct > 1.0:
+        area_str = _fmt_area(structure_km2)
+        supporting.append(f"Structural consensus: {structure_pct}% of footprint verified by radar double-bounce{area_str}.")
+        supporting.append("Complementary sensors: Optical structural edges reinforced by SAR dielectric corner reflections.")
+    else:
+        supporting.append("Multimodal alignment: Aligned SAR backscatter and optical spectral signatures.")
+
+    if primary_class:
+        conf_str = f" ({round(class_conf * 100, 1)}% confidence)" if class_conf else ""
+        supporting.append(f"Primary multimodal classification: {primary_class}{conf_str}.")
+    if vqa_answer:
+        supporting.append(f"Cross-sensor VQA: {vqa_answer}")
+    if data.get("croma_features_extracted"):
+        supporting.append("Backbone: CROMA ViT-B self-supervised cross-attention feature extraction.")
+
+    return full_answer, supporting
 
 
 def _compose_sar_scene_response(

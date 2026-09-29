@@ -17,7 +17,7 @@ Adheres strictly to the user query intent, avoiding generic or disconnected outp
 import os
 import time
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from pathlib import Path
 
 from backend.app.schemas.manifests import EvidenceBundle, AnalysisPlan
@@ -44,6 +44,48 @@ from backend.app.tasks.inference_tasks import (
 from backend.app.services.response_composer import compose_conversational_response
 
 logger = logging.getLogger("satquery.services.multi_model_pipeline")
+
+
+def separate_optical_sar(files: List[str], default_img: str) -> Tuple[str, str]:
+    """
+    Intelligently identifies (sar_path, optical_path) from user input files by inspecting
+    filenames, band counts, and raster metadata.
+    """
+    if not files:
+        return ("data/samples/sample_sar.tif", default_img)
+    if len(files) == 1:
+        f = files[0]
+        facts = extract_geotiff_facts(f)
+        is_sar = (
+            any(k in f.lower() for k in ("sar", "s1", "sentinel-1", "grd", "slc"))
+            or facts.get("bands", 3) in (1, 2)
+            or str(facts.get("sensor_inferred", "")).lower() == "sentinel-1"
+        )
+        return (f, default_img) if is_sar else ("data/samples/sample_sar.tif", f)
+
+    f1, f2 = files[0], files[1]
+    facts1 = extract_geotiff_facts(f1)
+    facts2 = extract_geotiff_facts(f2)
+
+    is_sar_1 = (
+        any(k in f1.lower() for k in ("sar", "s1", "sentinel-1", "grd", "slc"))
+        or str(facts1.get("sensor_inferred", "")).lower() == "sentinel-1"
+        or (facts1.get("bands", 0) in (1, 2) and facts2.get("bands", 0) >= 3)
+    )
+    is_sar_2 = (
+        any(k in f2.lower() for k in ("sar", "s1", "sentinel-1", "grd", "slc"))
+        or str(facts2.get("sensor_inferred", "")).lower() == "sentinel-1"
+        or (facts2.get("bands", 0) in (1, 2) and facts1.get("bands", 0) >= 3)
+    )
+
+    if is_sar_1 and not is_sar_2:
+        return (f1, f2)
+    elif is_sar_2 and not is_sar_1:
+        return (f2, f1)
+    else:
+        if facts1.get("bands", 3) <= facts2.get("bands", 3):
+            return (f1, f2)
+        return (f2, f1)
 
 
 def run_multi_model_pipeline(
@@ -134,18 +176,42 @@ def run_multi_model_pipeline(
                 res = execute_change_vqa_task(f1, f2, prompt)
                 model_outputs["change_vqa"] = res
                 participating_models.append("Paired Change VQA")
-            elif override_clean == "croma":
-                s1 = valid_files[0] if len(valid_files) > 0 else "data/samples/sample_sar.tif"
-                s2 = valid_files[1] if len(valid_files) > 1 else default_img
-                res = execute_croma_task(sentinel_1_path=s1, sentinel_2_path=s2)
-                model_outputs["croma"] = res
-                participating_models.append("CROMA-Base")
-            elif override_clean == "optical_sar_head":
-                s1 = valid_files[0] if len(valid_files) > 0 else "data/samples/sample_sar.tif"
-                s2 = valid_files[1] if len(valid_files) > 1 else default_img
-                res = execute_optical_sar_task(sentinel_1_path=s1, sentinel_2_path=s2)
-                model_outputs["optical_sar_head"] = res
-                participating_models.append("Optical-SAR Classification Head")
+            elif override_clean in ("croma", "optical_sar", "optical_sar_head"):
+                sar_path, opt_path = separate_optical_sar(valid_files, default_img)
+                focus = "flood" if any(w in prompt.lower() for w in ("flood", "water", "inundat", "wet")) else "structural"
+                optical_sar_data = compute_optical_sar_fusion(opt_path, sar_path, query_focus=focus)
+                if optical_sar_data and optical_sar_data.get("mask_path"):
+                    output_assets["fusion_mask"] = optical_sar_data["mask_path"]
+
+                try:
+                    res_croma = execute_croma_task(sentinel_1_path=sar_path, sentinel_2_path=opt_path)
+                    if res_croma.get("success"):
+                        model_outputs["croma"] = res_croma
+                        participating_models.append("CROMA-Base")
+                    else:
+                        partial_failures.append({"model": "CROMA-Base", "error": res_croma.get("error_message", "Failed")})
+                except Exception as e:
+                    partial_failures.append({"model": "CROMA-Base", "error": str(e)})
+
+                try:
+                    res_os = execute_optical_sar_task(sentinel_1_path=sar_path, sentinel_2_path=opt_path)
+                    if res_os.get("success"):
+                        model_outputs["optical_sar_head"] = res_os
+                        participating_models.append("Optical-SAR Classification Head")
+                    else:
+                        partial_failures.append({"model": "Optical-SAR Head", "error": res_os.get("error_message", "Failed")})
+                except Exception as e:
+                    partial_failures.append({"model": "Optical-SAR Head", "error": str(e)})
+
+                try:
+                    res_vqa = execute_change_vqa_task(opt_path, sar_path, prompt)
+                    if res_vqa.get("success"):
+                        model_outputs["change_vqa"] = res_vqa
+                        participating_models.append("Paired Change VQA")
+                    else:
+                        partial_failures.append({"model": "Paired Change VQA", "error": res_vqa.get("error_message", "Failed")})
+                except Exception as e:
+                    partial_failures.append({"model": "Paired Change VQA", "error": str(e)})
         except Exception as e:
             logger.error(f"Override model {override_clean} failed: {e}", exc_info=True)
             partial_failures.append({"model": override_clean, "error": str(e)})
@@ -278,29 +344,46 @@ def run_multi_model_pipeline(
 
     # --- Path E: Optical + SAR Multimodal Fusion ---
     elif intent in ("optical_sar_flood", "optical_sar_buildings", "optical_sar_fusion"):
-        s1 = valid_files[0] if len(valid_files) > 0 else "data/samples/sample_sar.tif"
-        s2 = valid_files[1] if len(valid_files) > 1 else default_img
+        sar_path, opt_path = separate_optical_sar(valid_files, default_img)
 
-        focus = "flood" if intent == "optical_sar_flood" else "structural"
-        optical_sar_data = compute_optical_sar_fusion(s2, s1, query_focus=focus)
+        focus = "flood" if intent == "optical_sar_flood" or any(w in prompt.lower() for w in ("flood", "water", "inundat", "wet")) else ("structural" if intent == "optical_sar_buildings" else "auto")
+        optical_sar_data = compute_optical_sar_fusion(opt_path, sar_path, query_focus=focus)
+        if optical_sar_data and optical_sar_data.get("mask_path"):
+            output_assets["fusion_mask"] = optical_sar_data["mask_path"]
 
+        # 1. CROMA Base self-supervised foundation representations
         if "croma" in (plan.required_models if plan else ["croma"]):
             try:
-                croma_res = execute_croma_task(sentinel_1_path=s1, sentinel_2_path=s2)
+                croma_res = execute_croma_task(sentinel_1_path=sar_path, sentinel_2_path=opt_path)
                 if croma_res.get("success"):
                     model_outputs["croma"] = croma_res
                     participating_models.append("CROMA-Base")
+                else:
+                    partial_failures.append({"model": "CROMA-Base", "error": croma_res.get("error_message", "Failed")})
             except Exception as e:
                 partial_failures.append({"model": "CROMA-Base", "error": str(e)})
 
-        if "optical_sar_head" in (plan.required_models if plan else []):
-            try:
-                os_res = execute_optical_sar_task(sentinel_1_path=s1, sentinel_2_path=s2)
-                if os_res.get("success"):
-                    model_outputs["optical_sar_head"] = os_res
-                    participating_models.append("Optical-SAR Classification Head")
-            except Exception as e:
-                partial_failures.append({"model": "Optical-SAR Head", "error": str(e)})
+        # 2. Downstream Optical-SAR classification head (19 BigEarthNet land cover classes)
+        try:
+            os_res = execute_optical_sar_task(sentinel_1_path=sar_path, sentinel_2_path=opt_path)
+            if os_res.get("success"):
+                model_outputs["optical_sar_head"] = os_res
+                participating_models.append("Optical-SAR Classification Head")
+            else:
+                partial_failures.append({"model": "Optical-SAR Head", "error": os_res.get("error_message", "Failed")})
+        except Exception as e:
+            partial_failures.append({"model": "Optical-SAR Head", "error": str(e)})
+
+        # 3. Cross-sensor VQA reasoning via Change VQA
+        try:
+            cvqa_res = execute_change_vqa_task(opt_path, sar_path, prompt)
+            if cvqa_res.get("success"):
+                model_outputs["change_vqa"] = cvqa_res
+                participating_models.append("Paired Change VQA")
+            else:
+                partial_failures.append({"model": "Paired Change VQA", "error": cvqa_res.get("error_message", "Failed")})
+        except Exception as e:
+            partial_failures.append({"model": "Paired Change VQA", "error": str(e)})
 
         if "owlv2" in (plan.required_models if plan else []):
             try:
@@ -413,6 +496,12 @@ def run_multi_model_pipeline(
         "fused_flood_pct": optical_sar_data.get("fused_flood_pct") if optical_sar_data else None,
         "fused_flood_area_km2": optical_sar_data.get("fused_flood_area_km2") if optical_sar_data else None,
         "suppressed_false_positives_px": optical_sar_data.get("suppressed_false_positives_px") if optical_sar_data else None,
+        "structure_pct": optical_sar_data.get("structure_pct") if optical_sar_data else None,
+        "structure_area_km2": optical_sar_data.get("structure_area_km2") if optical_sar_data else None,
+        "optical_sar_primary_class": model_outputs.get("optical_sar_head", {}).get("output_metadata", {}).get("primary_class"),
+        "optical_sar_confidence": model_outputs.get("optical_sar_head", {}).get("output_metadata", {}).get("confidence"),
+        "change_vqa_answer": model_outputs.get("change_vqa", {}).get("output_metadata", {}).get("answer"),
+        "croma_features_extracted": bool(model_outputs.get("croma", {}).get("success")),
         "total_detections": model_outputs.get("geoground", {}).get("output_metadata", {}).get("total_detections"),
         "predictions": model_outputs.get("geoground", {}).get("output_metadata", {}).get("predictions", []),
         "detected_classes": model_outputs.get("upernet", {}).get("output_metadata", {}).get("detected_classes", []),
@@ -424,9 +513,10 @@ def run_multi_model_pipeline(
         "exceed_area_km2": spectral_measurements[0].get("exceed_area_km2") if spectral_measurements else None,
     }
 
+    effective_intent = "optical_sar_fusion" if override_clean in ("croma", "optical_sar", "optical_sar_head") else intent
     composed_res = compose_conversational_response(
         query=prompt,
-        intent=intent,
+        intent=effective_intent,
         findings_data=findings_data
     )
     synthesis_markdown = composed_res["answer"]
@@ -518,6 +608,10 @@ def _build_comprehensive_synthesis(
         "fused_flood_pct": optical_sar_data.get("fused_flood_pct") if optical_sar_data else None,
         "fused_flood_area_km2": optical_sar_data.get("fused_flood_area_km2") if optical_sar_data else None,
         "suppressed_false_positives_px": optical_sar_data.get("suppressed_false_positives_px") if optical_sar_data else None,
+        "optical_sar_primary_class": model_outputs.get("optical_sar_head", {}).get("output_metadata", {}).get("primary_class"),
+        "optical_sar_confidence": model_outputs.get("optical_sar_head", {}).get("output_metadata", {}).get("confidence"),
+        "optical_sar_summary": model_outputs.get("optical_sar_head", {}).get("output_metadata", {}).get("summary"),
+        "change_vqa_answer": model_outputs.get("change_vqa", {}).get("output_metadata", {}).get("answer"),
         "total_detections": model_outputs.get("geoground", {}).get("output_metadata", {}).get("total_detections"),
         "predictions": model_outputs.get("geoground", {}).get("output_metadata", {}).get("predictions", []),
         "detected_classes": model_outputs.get("upernet", {}).get("output_metadata", {}).get("detected_classes", []),
@@ -616,6 +710,39 @@ def _extract_all_findings(
                 "label": "Confirmed Flood Extent",
                 "detail": f"{optical_sar_data.get('fused_flood_pct')}% of shared extent ({optical_sar_data.get('fused_flood_area_km2', 'N/A')} km²)",
                 "confidence": 0.95
+            })
+        elif optical_sar_data.get("focus") == "structural":
+            findings.append({
+                "label": "Structural Double-Bounce Resonance",
+                "detail": f"{optical_sar_data.get('structure_pct')}% structural features confirmed by radar and optical consensus",
+                "confidence": 0.92
+            })
+
+    if "optical_sar_head" in model_outputs:
+        meta = model_outputs["optical_sar_head"].get("output_metadata", {})
+        primary = meta.get("primary_class")
+        conf = meta.get("confidence")
+        if primary:
+            findings.append({
+                "label": "Optical-SAR Land Cover",
+                "detail": f"Classified as '{primary}' ({round(conf * 100, 1) if conf else 'N/A'}% confidence)",
+                "confidence": conf or 0.90
+            })
+        for dc in meta.get("detected_classes", [])[1:3]:
+            findings.append({
+                "label": f"Associated Class: {dc.get('class')}",
+                "detail": f"Confidence: {round(dc.get('confidence', 0) * 100, 1)}%",
+                "confidence": dc.get("confidence")
+            })
+
+    if "change_vqa" in model_outputs:
+        meta = model_outputs["change_vqa"].get("output_metadata", {})
+        ans = meta.get("answer")
+        if ans:
+            findings.append({
+                "label": "Cross-Sensor Visual Reasoning",
+                "detail": ans,
+                "confidence": meta.get("confidence") or 0.85
             })
 
     # 6. OWLv2 Grounding Detections

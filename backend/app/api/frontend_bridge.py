@@ -193,6 +193,7 @@ async def poll_job_or_format(
 
                                     if exec_result.get("participating_models"):
                                         response["model"] = " + ".join(exec_result["participating_models"])
+                                        response["participating_models"] = exec_result["participating_models"]
 
                                     metrics_data = exec_result.get("metrics") or {}
                                     if hasattr(metrics_data, "model_dump"):
@@ -206,6 +207,9 @@ async def poll_job_or_format(
                                     assets = exec_result.get("output_assets", {})
                                     if "change_mask" in assets:
                                         mask_rel = Path(assets["change_mask"]).name
+                                        response["maskUrl"] = f"/api/assets/{mask_rel}"
+                                    elif "fusion_mask" in assets:
+                                        mask_rel = Path(assets["fusion_mask"]).name
                                         response["maskUrl"] = f"/api/assets/{mask_rel}"
                                     elif "grounding_overlay" in assets:
                                         mask_rel = Path(assets["grounding_overlay"]).name
@@ -239,11 +243,15 @@ async def poll_job_or_format(
                 response["sections"] = fallback_res.get("sections", {})
                 if fallback_res.get("participating_models"):
                     response["model"] = " + ".join(fallback_res["participating_models"])
+                    response["participating_models"] = fallback_res["participating_models"]
                 response["metrics"] = {"status": "completed"}
                 current_task = str((fallback_params or {}).get("task") or result.get("task") or "")
                 assets = fallback_res.get("output_assets", {})
                 if "change_mask" in assets:
                     mask_rel = Path(assets["change_mask"]).name
+                    response["maskUrl"] = f"/api/assets/{mask_rel}"
+                elif "fusion_mask" in assets:
+                    mask_rel = Path(assets["fusion_mask"]).name
                     response["maskUrl"] = f"/api/assets/{mask_rel}"
                 elif "grounding_overlay" in assets:
                     mask_rel = Path(assets["grounding_overlay"]).name
@@ -296,13 +304,18 @@ async def poll_job_or_format(
 
             if exec_result.get("participating_models"):
                 response["model"] = " + ".join(exec_result["participating_models"])
+                response["participating_models"] = exec_result["participating_models"]
             elif result.get("participating_models"):
                 response["model"] = " + ".join(result["participating_models"])
+                response["participating_models"] = result["participating_models"]
 
             current_task = str((fallback_params or {}).get("task") or result.get("task") or "")
             assets = exec_result.get("output_assets", {}) or result.get("output_assets", {})
             if "change_mask" in assets:
                 mask_rel = Path(assets["change_mask"]).name
+                response["maskUrl"] = f"/api/assets/{mask_rel}"
+            elif "fusion_mask" in assets:
+                mask_rel = Path(assets["fusion_mask"]).name
                 response["maskUrl"] = f"/api/assets/{mask_rel}"
             elif "grounding_overlay" in assets:
                 mask_rel = Path(assets["grounding_overlay"]).name
@@ -411,6 +424,17 @@ async def frontend_analysis(
     pair_type = data.get("pair_type", "single_image")
     target_model_id = data.get("model", "")
 
+    is_optical_sar = (
+        task in ("optical_sar_fusion", "optical-sar")
+        or pair_type == "optical_sar"
+        or target_model_id in ("croma", "optical_sar", "optical_sar_head")
+    )
+    if is_optical_sar:
+        pair_type = "optical_sar"
+        task = "optical_sar_fusion"
+        if not target_model_id:
+            target_model_id = "croma"
+
     has_geotiff = any(p.lower().endswith((".tif", ".tiff")) for p in file_paths)
     input_cat = "geotiff" if has_geotiff else ("benchmark" if file_paths else "query")
 
@@ -419,8 +443,10 @@ async def frontend_analysis(
         "input_category": input_cat,
         "file_paths": file_paths,
         "prompt": prompt,
-        "pair_type": pair_type if len(file_paths) >= 2 else "single_image",
+        "pair_type": pair_type if (len(file_paths) >= 2 or is_optical_sar) else "single_image",
         "target_model_id": target_model_id,
+        "diagnostic_override": target_model_id if target_model_id else None,
+        "diagnostic_mode": bool(target_model_id),
         "validation_info": {},
         "dispatch_mode": "worker",
         "result": {}
@@ -432,7 +458,7 @@ async def frontend_analysis(
     fallback_params = {
         "file_paths": file_paths,
         "prompt": prompt,
-        "pair_type": pair_type if len(file_paths) >= 2 else "single_image",
+        "pair_type": pair_type if (len(file_paths) >= 2 or is_optical_sar) else "single_image",
         "task": task,
         "diagnostic_override": target_model_id or None
     }

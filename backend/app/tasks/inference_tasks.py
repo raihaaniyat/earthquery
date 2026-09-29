@@ -146,7 +146,7 @@ def execute_change_vqa_task(image_t1_path: str, image_t2_path: str, prompt: str 
         attempt_id="1",
         model_version_id="change_vqa",
         task_type="change_vqa",
-        asset_references={"image_t1": image_t1_path, "image_t2": image_t2_path},
+        asset_references={"image_t1": os.path.abspath(image_t1_path), "image_t2": os.path.abspath(image_t2_path)},
         parameters={"prompt": prompt},
         output_dir=out_dir
     )

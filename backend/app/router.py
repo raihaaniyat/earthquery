@@ -325,9 +325,7 @@ def node_dispatch_or_execute(state: RouterState) -> Dict[str, Any]:
             }
         }
 
-    diagnostic_override = state.get("diagnostic_override") or (
-        state.get("target_model_id") if state.get("diagnostic_mode") else None
-    )
+    diagnostic_override = state.get("diagnostic_override") or state.get("target_model_id") or None
 
     q = get_queue() if dispatch_mode not in ("direct", "isolated") else None
     if q is not None:
@@ -347,10 +345,15 @@ def node_dispatch_or_execute(state: RouterState) -> Dict[str, Any]:
         if diagnostic_override:
             if diagnostic_override == "internvl3":
                 job = q.enqueue(execute_internvl_task, default_img, state.get("prompt", ""))
-            elif diagnostic_override == "croma":
-                s1 = files[0] if len(files) > 0 and os.path.exists(files[0]) else "data/samples/sample_sar.tif"
-                s2 = files[1] if len(files) > 1 and os.path.exists(files[1]) else default_img
-                job = q.enqueue(execute_croma_task, sentinel_1_path=s1, sentinel_2_path=s2)
+            elif diagnostic_override in ("croma", "optical_sar", "optical_sar_head"):
+                job = q.enqueue(
+                    execute_pipeline_task,
+                    file_paths=files if files else [default_img],
+                    prompt=state.get("prompt", ""),
+                    pair_type="optical_sar",
+                    user_intent="optical_sar_fusion",
+                    diagnostic_override=diagnostic_override
+                )
             elif diagnostic_override == "changeformer":
                 t1 = files[0] if len(files) > 0 and os.path.exists(files[0]) else "data/samples/sample_optical.png"
                 t2 = files[1] if len(files) > 1 and os.path.exists(files[1]) else t1
@@ -363,10 +366,6 @@ def node_dispatch_or_execute(state: RouterState) -> Dict[str, Any]:
                 t1 = files[0] if len(files) > 0 and os.path.exists(files[0]) else "data/samples/sample_optical.png"
                 t2 = files[1] if len(files) > 1 and os.path.exists(files[1]) else t1
                 job = q.enqueue(execute_change_vqa_task, t1, t2, state.get("prompt", ""))
-            elif diagnostic_override == "optical_sar_head":
-                s1 = files[0] if len(files) > 0 and os.path.exists(files[0]) else "data/samples/sample_sar.tif"
-                s2 = files[1] if len(files) > 1 and os.path.exists(files[1]) else default_img
-                job = q.enqueue(execute_optical_sar_task, sentinel_1_path=s1, sentinel_2_path=s2)
             else:
                 job = q.enqueue(
                     execute_pipeline_task,
@@ -409,18 +408,18 @@ def node_dispatch_or_execute(state: RouterState) -> Dict[str, Any]:
             exec_res = execute_geoground_task(default_img, state.get("prompt", ""))
         elif diagnostic_override == "upernet":
             exec_res = execute_upernet_task(default_img)
-        elif diagnostic_override == "croma":
-            s1 = files[0] if len(files) > 0 and os.path.exists(files[0]) else "data/samples/sample_sar.tif"
-            s2 = files[1] if len(files) > 1 and os.path.exists(files[1]) else default_img
-            exec_res = execute_croma_task(sentinel_1_path=s1, sentinel_2_path=s2)
+        elif diagnostic_override in ("croma", "optical_sar", "optical_sar_head"):
+            exec_res = run_multi_model_pipeline(
+                file_paths=files if files else [default_img],
+                prompt=state.get("prompt", ""),
+                pair_type="optical_sar",
+                user_intent="optical_sar_fusion",
+                diagnostic_override=diagnostic_override
+            )
         elif diagnostic_override == "change_vqa":
             t1 = files[0] if len(files) > 0 and os.path.exists(files[0]) else "data/samples/sample_optical.png"
             t2 = files[1] if len(files) > 1 and os.path.exists(files[1]) else t1
             exec_res = execute_change_vqa_task(t1, t2, state.get("prompt", ""))
-        elif diagnostic_override == "optical_sar_head":
-            s1 = files[0] if len(files) > 0 and os.path.exists(files[0]) else "data/samples/sample_sar.tif"
-            s2 = files[1] if len(files) > 1 and os.path.exists(files[1]) else default_img
-            exec_res = execute_optical_sar_task(sentinel_1_path=s1, sentinel_2_path=s2)
         else:
             exec_res = run_multi_model_pipeline(
                 file_paths=files if files else [default_img],
@@ -438,6 +437,9 @@ def node_dispatch_or_execute(state: RouterState) -> Dict[str, Any]:
                 "summary": narrative,
                 "sections": sections,
                 "findings": exec_res.get("findings", []),
+                "supporting_findings": exec_res.get("supporting_findings", []),
+                "output_assets": exec_res.get("output_assets", {}),
+                "participating_models": exec_res.get("participating_models", []),
                 "decision_reason": decision.get("decision_reason")
             }
         }
