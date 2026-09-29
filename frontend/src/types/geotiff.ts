@@ -40,6 +40,10 @@ export interface GeoTiffLayer {
   file: File;
   name: string;
   imageUrl: string;
+  previewUrl?: string;
+  mapImageUrl?: string;
+  isSar?: boolean;
+  previewReady?: boolean;
   metadata: GeoTiffMetadata;
   bounds: [[number, number], [number, number]]; // Leaflet [[south, west], [north, east]]
   visible: boolean;

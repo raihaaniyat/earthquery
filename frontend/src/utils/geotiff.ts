@@ -7,6 +7,7 @@ import type {
   GeoTiffProcessState,
   GeoTiffWgs84Bounds
 } from '../types/geotiff';
+import type { AttachedImage } from '../types/app';
 
 // Register standard projections in proj4
 if (!proj4.defs('EPSG:4326')) {
@@ -454,30 +455,56 @@ export async function renderGeoTiffRaster(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const band3 = (numBands > 3 ? rasters[3] : null) as any;
 
-  // Check data ranges for automatic contrast scaling
-  const sampleSize = Math.min(band0.length, 10000);
-  const step = Math.max(1, Math.floor(band0.length / sampleSize));
-  let minVal = Infinity;
-  let maxVal = -Infinity;
+  // Fast 2nd-98th percentile stretch for scientific contrast & SAR radiometry
+  function calcBandPercentiles(band: ArrayLike<number>, noData: number): [number, number] {
+    const sample: number[] = [];
+    const maxSamples = 8000;
+    const step = Math.max(1, Math.floor(band.length / maxSamples));
+    for (let i = 0; i < band.length; i += step) {
+      const v = band[i];
+      if (Number.isFinite(v) && (Number.isNaN(noData) || v !== noData)) {
+        sample.push(v);
+      }
+    }
+    if (sample.length === 0) return [0, 255];
+    sample.sort((a, b) => a - b);
+    const p2 = sample[Math.floor(sample.length * 0.02)];
+    const p98 = sample[Math.floor(sample.length * 0.98)];
+    if (p98 > p2) return [p2, p98];
+    const min = sample[0];
+    const max = sample[sample.length - 1];
+    return [min, max > min ? max : min + 1];
+  }
+
   const noDataNum = metadata.noData !== null ? Number(metadata.noData) : NaN;
+  const isRgb = numBands >= 3;
+  const hasAlpha = metadata.hasAlpha && band3 !== null;
 
-  for (let i = 0; i < band0.length; i += step) {
-    const v = band0[i];
-    if (!Number.isNaN(noDataNum) && v === noDataNum) continue;
-    if (v < minVal) minVal = v;
-    if (v > maxVal) maxVal = v;
+  // Band assignments
+  let rBand = band0;
+  let gBand = band1;
+  let bBand = band2;
+  if (numBands >= 12) {
+    // Standard Sentinel-2 L1C/L2A: Band 4 (Red), Band 3 (Green), Band 2 (Blue)
+    rBand = rasters[3] as any;
+    gBand = rasters[2] as any;
+    bBand = rasters[1] as any;
   }
 
-  if (minVal === Infinity || maxVal === -Infinity) {
-    minVal = 0;
-    maxVal = 255;
+  let rRange: [number, number] = [0, 255];
+  let gRange: [number, number] = [0, 255];
+  let bRange: [number, number] = [0, 255];
+  let grayRange: [number, number] = [0, 255];
+
+  if (isRgb) {
+    rRange = calcBandPercentiles(rBand, noDataNum);
+    gRange = calcBandPercentiles(gBand, noDataNum);
+    bRange = calcBandPercentiles(bBand, noDataNum);
+  } else {
+    grayRange = calcBandPercentiles(band0, noDataNum);
   }
-  if (maxVal <= minVal) maxVal = minVal + 1;
 
-  // Needs scaling if not standard uint8 (0-255)
-  const needsScale = minVal < 0 || maxVal > 255 || metadata.dataType.includes('float') || metadata.dataType.includes('16');
-
-  // Direct native canvas
+  // Direct native canvas (the true un-warped raster image preview)
   const nativeCanvas = document.createElement('canvas');
   nativeCanvas.width = targetW;
   nativeCanvas.height = targetH;
@@ -487,52 +514,39 @@ export async function renderGeoTiffRaster(
   const imgData = ctx.createImageData(targetW, targetH);
   const buf = imgData.data;
 
-  const isRgb = numBands >= 3;
-  const hasAlpha = metadata.hasAlpha && band3 !== null;
-
   for (let i = 0; i < band0.length; i++) {
     const idx = i * 4;
     const v0 = band0[i];
 
-    // Check NoData
-    if (!Number.isNaN(noDataNum) && v0 === noDataNum) {
+    // Check NoData or non-finite
+    if (!Number.isFinite(v0) || (!Number.isNaN(noDataNum) && v0 === noDataNum)) {
       buf[idx + 3] = 0;
       continue;
     }
 
     if (isRgb) {
-      let r = v0;
-      let g = band1[i];
-      let b = band2[i];
+      const rVal = rBand[i];
+      const gVal = gBand[i];
+      const bVal = bBand[i];
 
-      if (needsScale) {
-        r = Math.min(255, Math.max(0, ((r - minVal) / (maxVal - minVal)) * 255));
-        g = Math.min(255, Math.max(0, ((g - minVal) / (maxVal - minVal)) * 255));
-        b = Math.min(255, Math.max(0, ((b - minVal) / (maxVal - minVal)) * 255));
-      }
+      const r = Math.min(255, Math.max(0, Math.round(((rVal - rRange[0]) / (rRange[1] - rRange[0])) * 255)));
+      const g = Math.min(255, Math.max(0, Math.round(((gVal - gRange[0]) / (gRange[1] - gRange[0])) * 255)));
+      const b = Math.min(255, Math.max(0, Math.round(((bVal - bRange[0]) / (bRange[1] - bRange[0])) * 255)));
 
       buf[idx] = r;
       buf[idx + 1] = g;
       buf[idx + 2] = b;
-
-      // Alpha
-      if (hasAlpha) {
-        buf[idx + 3] = band3[i];
-      } else {
-        // If pure black and nodata border
-        if (r === 0 && g === 0 && b === 0 && (metadata.epsg !== 4326 || numBands > 3)) {
-          // Keep solid or check context
-          buf[idx + 3] = 255;
-        } else {
-          buf[idx + 3] = 255;
-        }
-      }
+      buf[idx + 3] = hasAlpha ? band3[i] : 255;
+    } else if (numBands === 2) {
+      // Dual polarization SAR (e.g. VV / VH)
+      const gray = Math.min(255, Math.max(0, Math.round(((v0 - grayRange[0]) / (grayRange[1] - grayRange[0])) * 255)));
+      buf[idx] = gray;
+      buf[idx + 1] = gray;
+      buf[idx + 2] = gray;
+      buf[idx + 3] = 255;
     } else {
-      // Grayscale
-      let gray = v0;
-      if (needsScale) {
-        gray = Math.min(255, Math.max(0, ((gray - minVal) / (maxVal - minVal)) * 255));
-      }
+      // Grayscale / Single-band SAR / Elevation
+      const gray = Math.min(255, Math.max(0, Math.round(((v0 - grayRange[0]) / (grayRange[1] - grayRange[0])) * 255)));
       buf[idx] = gray;
       buf[idx + 1] = gray;
       buf[idx + 2] = gray;
@@ -541,17 +555,19 @@ export async function renderGeoTiffRaster(
   }
 
   ctx.putImageData(imgData, 0, 0);
+  const previewDataUrl = nativeCanvas.toDataURL('image/png');
 
   // If already EPSG:4326 (WGS84) and north-up, native canvas directly aligns with Leaflet bounds
   if (metadata.epsg === 4326 && !metadata.modelTransformation) {
     onProgress?.(90, 'Preparing raster overlay...');
     return {
       canvas: nativeCanvas,
-      dataUrl: nativeCanvas.toDataURL('image/png')
-    };
+      dataUrl: previewDataUrl,
+      previewUrl: previewDataUrl
+    } as any;
   }
 
-  // If projected CRS (e.g. UTM, Web Mercator, etc.), reproject onto an axis-aligned WGS84 canvas
+  // If projected CRS (e.g. UTM, Web Mercator, etc.), reproject onto an axis-aligned WGS84 canvas for the map
   onProgress?.(80, 'Reprojecting coordinates to map grid...');
   const projCanvas = document.createElement('canvas');
   projCanvas.width = targetW;
@@ -609,8 +625,24 @@ export async function renderGeoTiffRaster(
   onProgress?.(95, 'Finalizing image overlay...');
   return {
     canvas: projCanvas,
-    dataUrl: projCanvas.toDataURL('image/png')
-  };
+    dataUrl: projCanvas.toDataURL('image/png'),
+    previewUrl: previewDataUrl
+  } as any;
+}
+
+/**
+ * Detects whether a raster is a SAR product from filename or metadata.
+ */
+export function isSarRaster(fileName: string, metadata?: GeoTiffMetadata): boolean {
+  const name = fileName.toLowerCase();
+  const sarKeywords = [
+    'sar', 'sentinel-1', 's1', 'nisar', 'asf', 'slc', 'grd',
+    'backscatter', 'sigma0', 'gamma0', 'amplitude', 'intensity',
+    'pol_vv', 'pol_vh', 'pol_hh', 'pol_hv', '_vv', '_vh', '_hh', '_hv'
+  ];
+  if (sarKeywords.some((k) => name.includes(k))) return true;
+  if (metadata?.crsName && /radar|sar/i.test(metadata.crsName)) return true;
+  return false;
 }
 
 /**
@@ -664,23 +696,29 @@ export async function loadGeoTiffFile(
 
   onStateChange?.({
     stage: 'rendering',
-    message: 'Rendering raster channels...',
+    message: 'Rendering raster channels with optimal contrast...',
     progressPercent: 60
   });
 
-  const { canvas, dataUrl } = await renderGeoTiffRaster(image, metadata, (percent, msg) => {
+  const { canvas, dataUrl, previewUrl } = (await renderGeoTiffRaster(image, metadata, (percent, msg) => {
     onStateChange?.({
       stage: 'rendering',
       message: msg,
       progressPercent: percent
     });
-  });
+  })) as any;
+
+  const isSar = isSarRaster(fileName, metadata);
 
   const layer: GeoTiffLayer = {
     id: `geotiff-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     file,
     name: fileName,
-    imageUrl: dataUrl,
+    imageUrl: previewUrl || dataUrl,
+    previewUrl: previewUrl || dataUrl,
+    mapImageUrl: dataUrl,
+    isSar,
+    previewReady: true,
     metadata,
     bounds: [
       [metadata.wgs84Bounds.minLat, metadata.wgs84Bounds.minLon],
@@ -695,9 +733,160 @@ export async function loadGeoTiffFile(
 
   onStateChange?.({
     stage: 'success',
-    message: `GeoTIFF loaded successfully (${metadata.crsName})`,
+    message: `GeoTIFF loaded successfully (${metadata.crsName}${isSar ? ' · SAR' : ''})`,
     progressPercent: 100
   });
 
   return layer;
 }
+
+/**
+ * Converts a GeoTiffLayer into a unified AttachedImage representation.
+ */
+export function layerToAttachedImage(layer: GeoTiffLayer, imgEl?: HTMLImageElement | null): AttachedImage {
+  const pUrl = layer.previewUrl || layer.imageUrl;
+  return {
+    id: layer.id,
+    name: layer.name,
+    size: layer.file.size,
+    type: 'image/tiff',
+    url: pUrl,
+    file: layer.file,
+    width: layer.metadata.width,
+    height: layer.metadata.height,
+    previewable: true,
+    image: imgEl || null,
+    isGeoTiff: true,
+    isSar: layer.isSar,
+    crs: layer.metadata.crsName,
+    crsName: layer.metadata.crsName,
+    epsg: layer.metadata.epsg,
+    bounds: layer.bounds,
+    wgs84Bounds: layer.metadata.wgs84Bounds,
+    nativeBbox: layer.metadata.nativeBbox,
+    bands: layer.metadata.numBands,
+    dataType: layer.metadata.dataType,
+    metadata: layer.metadata,
+    previewStatus: 'ready',
+    mapImageUrl: layer.mapImageUrl
+  };
+}
+
+/**
+ * Loads any GeoTIFF file directly into a first-class AttachedImage with a generated visual preview.
+ * Includes client-side rendering with automatic fallback to backend /api/geotiff/preview.
+ */
+export async function loadGeoTiffAsAttachedImage(
+  file: File,
+  onStateChange?: (state: GeoTiffProcessState) => void
+): Promise<AttachedImage> {
+  const fileName = file.name;
+
+  try {
+    const layer = await loadGeoTiffFile(file, onStateChange);
+    const pUrl = layer.previewUrl || layer.imageUrl;
+
+    const imgEl = await new Promise<HTMLImageElement | null>((resolve) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => resolve(null);
+      el.src = pUrl;
+    });
+
+    return layerToAttachedImage(layer, imgEl);
+  } catch (clientErr: unknown) {
+    const clientErrMsg = clientErr instanceof Error ? clientErr.message : String(clientErr);
+
+    // Fallback: Query backend /api/geotiff/preview
+    try {
+      onStateChange?.({
+        stage: 'rendering',
+        message: 'Requesting server-side preview...',
+        progressPercent: 75
+      });
+
+      const fd = new FormData();
+      fd.append('file', file, file.name);
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 12000);
+      const res = await fetch('/api/geotiff/preview', {
+        method: 'POST',
+        body: fd,
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+
+      if (res.ok) {
+        const data = await res.json();
+        const pUrl = data.preview_url;
+
+        const imgEl = await new Promise<HTMLImageElement | null>((resolve) => {
+          const el = new Image();
+          el.onload = () => resolve(el);
+          el.onerror = () => resolve(null);
+          el.src = pUrl;
+        });
+
+        const bounds: [[number, number], [number, number]] | undefined = data.bounds ? [
+          [data.bounds[1], data.bounds[0]],
+          [data.bounds[3], data.bounds[2]]
+        ] : undefined;
+
+        onStateChange?.({
+          stage: 'success',
+          message: `Server preview ready (${data.crs || 'GeoTIFF'})`,
+          progressPercent: 100
+        });
+
+        return {
+          id: `geotiff-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          name: fileName,
+          size: file.size,
+          type: 'image/tiff',
+          url: pUrl,
+          file,
+          width: data.width || 0,
+          height: data.height || 0,
+          previewable: true,
+          image: imgEl,
+          isGeoTiff: true,
+          isSar: Boolean(data.is_sar),
+          crs: data.crs || 'GeoTIFF',
+          crsName: data.crs || 'GeoTIFF',
+          bounds,
+          bands: data.bands || 1,
+          previewStatus: 'ready'
+        };
+      }
+    } catch {
+      // Backend fallback also failed
+    }
+
+    // Retain original file for analysis even if visual preview failed
+    const rawUrl = URL.createObjectURL(file);
+    onStateChange?.({
+      stage: 'error',
+      message: 'Preview unavailable. GeoTIFF is retained for AI analysis.',
+      error: clientErrMsg
+    });
+
+    return {
+      id: `geotiff-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      name: fileName,
+      size: file.size,
+      type: 'image/tiff',
+      url: rawUrl,
+      file,
+      width: 0,
+      height: 0,
+      previewable: false,
+      image: null,
+      isGeoTiff: true,
+      isSar: false,
+      previewStatus: 'error',
+      previewError: `Preview generation failed (${clientErrMsg}). The original GeoTIFF is still available for analysis.`
+    };
+  }
+}
+

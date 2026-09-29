@@ -16,6 +16,7 @@ import { useGeoTiffMap } from '../hooks/useGeoTiffMap';
 import { GeoTiffUploader } from '../components/geotiff/GeoTiffUploader';
 import { GeoTiffMetadataPanel } from '../components/geotiff/GeoTiffMetadataPanel';
 import { GeoTiffLayersPanel } from '../components/geotiff/GeoTiffLayersPanel';
+import { AoiCoordinateDisplay } from '../components/map/AoiCoordinateDisplay';
 import { BASEMAPS } from '../data/apiConfig';
 import { formatLatLng } from '../utils/geo';
 import { createId } from '../utils/files';
@@ -24,15 +25,33 @@ import type { GeoTiffLayer } from '../types/geotiff';
 
 export function GeoTiffWorkspace() {
   const { toast, navigate } = useApp();
-  const { setAoi, addFiles } = useWorkspace();
+  const { aoi, setAoi, addFiles, geoTiffLayers, addGeoTiffLayer, removeGeoTiffLayer } = useWorkspace();
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const [layers, setLayers] = useState<GeoTiffLayer[]>([]);
-  const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
+  const [layers, setLayers] = useState<GeoTiffLayer[]>(geoTiffLayers);
+  const [selectedLayerId, setSelectedLayerId] = useState<string | null>(geoTiffLayers[0]?.id || null);
   const [basemap, setBasemap] = useState<BasemapId>('satellite');
-  const [showLabels, setShowLabels] = useState(true);
+  const [showLabels, setShowLabels] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [activeTab, setActiveTab] = useState<'upload' | 'metadata'>('upload');
+
+  // Synchronize with global shared GeoTIFF layers
+  useEffect(() => {
+    if (geoTiffLayers.length > 0) {
+      setLayers((prev) => {
+        const next = [...prev];
+        for (const gl of geoTiffLayers) {
+          if (!next.some((l) => l.id === gl.id || l.name === gl.name)) {
+            next.unshift(gl);
+          }
+        }
+        return next;
+      });
+      if (!selectedLayerId) {
+        setSelectedLayerId(geoTiffLayers[0].id);
+      }
+    }
+  }, [geoTiffLayers, selectedLayerId]);
 
   const { map, cursor, fitLayer, zoomIn, zoomOut } = useGeoTiffMap(containerRef, {
     layers,
@@ -44,7 +63,8 @@ export function GeoTiffWorkspace() {
 
   // When a layer is loaded
   const handleLayerLoaded = (newLayer: GeoTiffLayer) => {
-    setLayers((prev) => [newLayer, ...prev]);
+    addGeoTiffLayer(newLayer);
+    setLayers((prev) => [newLayer, ...prev.filter((l) => l.id !== newLayer.id)]);
     setSelectedLayerId(newLayer.id);
     setActiveTab('metadata');
 
@@ -78,6 +98,7 @@ export function GeoTiffWorkspace() {
   };
 
   const handleRemoveLayer = (id: string) => {
+    removeGeoTiffLayer(id);
     setLayers((prev) => prev.filter((l) => l.id !== id));
     if (selectedLayerId === id) {
       const remaining = layers.filter((l) => l.id !== id);
@@ -112,21 +133,7 @@ export function GeoTiffWorkspace() {
   const handleSendToAi = async (layer: GeoTiffLayer) => {
     try {
       handleSetAoi(layer);
-
-      // Create attachment
-      const attached: AttachedImage = {
-        id: createId(),
-        name: layer.name,
-        size: layer.metadata.fileSizeBytes,
-        type: 'image/tiff',
-        url: layer.imageUrl,
-        file: layer.file,
-        width: layer.metadata.width,
-        height: layer.metadata.height,
-        previewable: true,
-        image: null
-      };
-
+      addGeoTiffLayer(layer);
       await addFiles([layer.file]);
       toast(`Sent ${layer.name} to AI Analyst workspace`, 'success');
       navigate('home');
@@ -165,11 +172,6 @@ export function GeoTiffWorkspace() {
             Upload geospatial GeoTIFFs (<code>.tif</code> / <code>.tiff</code>), read embedded metadata &amp; CRS, and accurately project rasters onto the interactive map.
           </p>
         </div>
-        <div className="head-actions">
-          <button className="btn primary" onClick={() => setActiveTab('upload')}>
-            <UploadCloudIcon size={14} /> + Upload GeoTIFF
-          </button>
-        </div>
       </div>
 
       <div className="panel">
@@ -195,6 +197,24 @@ export function GeoTiffWorkspace() {
           >
             <TagIcon size={14} /> Labels
           </button>
+
+          {aoi && (
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+              <span className="badge ok" style={{ fontSize: '11px', padding: '3px 8px' }}>
+                AOI selected
+              </span>
+              <button
+                className="btn small danger-text"
+                onClick={() => {
+                  setAoi(null);
+                  toast('AOI cleared');
+                }}
+                title="Clear selected AOI"
+              >
+                Clear AOI
+              </button>
+            </div>
+          )}
 
           <span className="spacer" />
 
@@ -248,6 +268,7 @@ export function GeoTiffWorkspace() {
             </div>
 
             {cursor && <div className="map-label coords">{formatLatLng(cursor)}</div>}
+            <AoiCoordinateDisplay aoi={aoi} onClear={() => { setAoi(null); toast('AOI cleared'); }} />
 
             {fullscreen && (
               <button className="btn map-exit" onClick={() => setFullscreen(false)}>

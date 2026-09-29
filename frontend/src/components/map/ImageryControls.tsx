@@ -1,5 +1,6 @@
-import React from 'react';
-import { SearchIcon, EyeIcon, SatelliteIcon, RadarIcon, GlobeIcon } from 'lucide-react';
+import React, { useState } from 'react';
+import { SearchIcon, EyeIcon, SatelliteIcon, RadarIcon, GlobeIcon, ArrowLeftRightIcon, CheckSquareIcon, SquareIcon } from 'lucide-react';
+import { useApp } from '../../contexts/AppContext';
 import { StateNotice } from '../StateNotice';
 import { SATELLITE_SOURCES } from '../../data/apiConfig';
 import { todayIso, validateDate } from '../../utils/geo';
@@ -32,11 +33,42 @@ function summarize(status: Record<LayerKey, LayerStatus>): {dot: string;text: st
 }
 
 export function ImageryControls(p: ImageryControlsProps) {
+  const { navigate } = useApp();
   const { imagery, updateImagery } = p;
+  const [selectedA, setSelectedA] = useState<string | null>(null);
+  const [selectedB, setSelectedB] = useState<string | null>(null);
+
   const hasInstance = Boolean(SATELLITE_SOURCES.sentinelHubInstanceId);
   const summary = summarize(p.layerStatus);
   const dateError = validateDate(imagery.date) ?? (imagery.compare ? validateDate(imagery.compareDate) : null);
   const today = todayIso(0);
+
+  const sceneA = p.scenes.find((s) => s.id === selectedA);
+  const sceneB = p.scenes.find((s) => s.id === selectedB);
+
+  const toggleSelectA = (id: string) => {
+    setSelectedA((prev) => (prev === id ? null : id));
+    if (selectedB === id) setSelectedB(null);
+  };
+
+  const toggleSelectB = (id: string) => {
+    setSelectedB((prev) => (prev === id ? null : id));
+    if (selectedA === id) setSelectedA(null);
+  };
+
+  const handleViewComparison = () => {
+    if (!sceneA || !sceneB) return;
+    const dateA = sceneA.datetime.slice(0, 10);
+    const dateB = sceneB.datetime.slice(0, 10);
+    // Earlier date as compareDate, later date as date
+    const [beforeDate, afterDate] = dateA <= dateB ? [dateA, dateB] : [dateB, dateA];
+    updateImagery({
+      compare: true,
+      compareDate: beforeDate,
+      date: afterDate
+    });
+    navigate('comparison');
+  };
 
   return (
     <div className="api-panel">
@@ -133,6 +165,56 @@ export function ImageryControls(p: ImageryControlsProps) {
         </button>
       </div>
 
+      {/* Comparison selection banner */}
+      {(selectedA || selectedB) && (
+        <div
+          style={{
+            marginTop: '10px',
+            padding: '10px 14px',
+            background: 'rgba(165, 108, 255, 0.12)',
+            border: '1px solid var(--accent)',
+            borderRadius: '8px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '8px',
+            fontSize: '12px'
+          }}
+        >
+          <div style={{ display: 'flex', gap: '14px', alignItems: 'center' }}>
+            <div>
+              <span className={sceneA ? 'badge ok' : 'badge'} style={{ marginRight: '6px' }}>
+                {sceneA ? '✓ Image A' : '☐ Image A'}
+              </span>
+              {sceneA ? (
+                <b>{sceneA.datetime.slice(0, 10)}</b>
+              ) : (
+                <span className="muted">None selected</span>
+              )}
+            </div>
+            <div>
+              <span className={sceneB ? 'badge ok' : 'badge'} style={{ marginRight: '6px' }}>
+                {sceneB ? '✓ Image B' : '☐ Image B'}
+              </span>
+              {sceneB ? (
+                <b>{sceneB.datetime.slice(0, 10)}</b>
+              ) : (
+                <span className="muted">None selected</span>
+              )}
+            </div>
+          </div>
+          <button
+            className="btn small primary"
+            onClick={handleViewComparison}
+            disabled={!sceneA || !sceneB}
+            title={!sceneA || !sceneB ? 'Select both Image A and Image B to compare' : 'Open comparison view'}
+          >
+            <ArrowLeftRightIcon size={12} /> View Comparison (A + B)
+          </button>
+        </div>
+      )}
+
       <div className="stac-results">
         <StateNotice
           state={p.sceneState}
@@ -141,23 +223,48 @@ export function ImageryControls(p: ImageryControlsProps) {
           successText={`${p.scenes.length} scene${p.scenes.length === 1 ? '' : 's'} found · footprints drawn on the map`}
           onRetry={p.onSearch} />
         
-        {p.scenes.map((s) =>
-        <div key={s.id} className={`stac-item${p.focusedScene === s.id ? ' focused' : ''}`}>
-            <span>
-              <b>{s.id}</b>
-              <br />
-              <small>
-                {s.datetime.slice(0, 16).replace('T', ' ')} UTC
-                {s.platform ? ` · ${s.platform}` : ''}
-                {s.cloudCover != null ? ` · cloud ${s.cloudCover.toFixed(1)}%` : ''}
-              </small>
-            </span>
-            <button className="btn small" onClick={() => p.onFocus(s.id)} aria-label={`View footprint of ${s.id}`}>
-              <EyeIcon size={12} /> View
-            </button>
-          </div>
-        )}
+        {p.scenes.map((s) => {
+          const isA = selectedA === s.id;
+          const isB = selectedB === s.id;
+          return (
+            <div key={s.id} className={`stac-item${p.focusedScene === s.id ? ' focused' : ''}${isA || isB ? ' selected' : ''}`}>
+              <span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px' }}>
+                  {isA && <span className="badge ok" style={{ fontSize: '10px', padding: '1px 5px' }}>Image A</span>}
+                  {isB && <span className="badge ok" style={{ fontSize: '10px', padding: '1px 5px' }}>Image B</span>}
+                  <b>{s.id}</b>
+                </div>
+                <small>
+                  {s.datetime.slice(0, 16).replace('T', ' ')} UTC
+                  {s.platform ? ` · ${s.platform}` : ''}
+                  {s.cloudCover != null ? ` · cloud ${s.cloudCover.toFixed(1)}%` : ''}
+                </small>
+              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <button
+                  className={`btn small${isA ? ' green' : ''}`}
+                  onClick={() => toggleSelectA(s.id)}
+                  title={isA ? 'Deselect as Image A' : 'Select as Image A'}
+                  style={{ padding: '3px 8px', fontSize: '11px' }}
+                >
+                  {isA ? <CheckSquareIcon size={12} /> : <SquareIcon size={12} />} A
+                </button>
+                <button
+                  className={`btn small${isB ? ' green' : ''}`}
+                  onClick={() => toggleSelectB(s.id)}
+                  title={isB ? 'Deselect as Image B' : 'Select as Image B'}
+                  style={{ padding: '3px 8px', fontSize: '11px' }}
+                >
+                  {isB ? <CheckSquareIcon size={12} /> : <SquareIcon size={12} />} B
+                </button>
+                <button className="btn small" onClick={() => p.onFocus(s.id)} aria-label={`View footprint of ${s.id}`} style={{ padding: '3px 8px', fontSize: '11px' }}>
+                  <EyeIcon size={12} /> View
+                </button>
+              </div>
+            </div>
+          );
+        })}
       </div>
-    </div>);
-
+    </div>
+  );
 }
