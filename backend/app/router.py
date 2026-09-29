@@ -59,6 +59,8 @@ class RouterState(TypedDict, total=False):
     prompt: str
     pair_type: str
     target_model_id: str
+    diagnostic_override: Optional[str]
+    diagnostic_mode: Optional[bool]
     validation_info: Dict[str, Any]
     manifests: List[Dict[str, Any]]
     pair_manifest: Optional[Dict[str, Any]]
