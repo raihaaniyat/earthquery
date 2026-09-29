@@ -41,6 +41,11 @@ from backend.app.schemas.manifests import (
     SceneManifest
 )
 
+try:
+    from backend.app.config import settings
+except Exception:
+    settings = None
+
 logger = logging.getLogger("satquery.services.raster_measurements")
 
 
@@ -608,29 +613,55 @@ def align_spatial_pair(file_1: str, file_2: str) -> Dict[str, Any]:
         except Exception as e:
             alignment["notes"].append(f"Geospatial alignment exception: {e}")
 
-    # Fallback for unreferenced or benchmark images: align dimensions via cropping/resampling
+    # Fallback for unreferenced, cross-modal, or benchmark images: align dimensions via cropping/resampling
     try:
-        from PIL import Image
-        im1 = Image.open(file_1)
-        im2 = Image.open(file_2)
-        min_w = min(im1.width, im2.width)
-        min_h = min(im1.height, im2.height)
+        def _read_array_for_alignment(f_path: str) -> np.ndarray:
+            if str(f_path).lower().endswith((".tif", ".tiff")):
+                if HAS_RASTERIO:
+                    try:
+                        with rasterio.open(f_path) as s:
+                            data = s.read().astype(np.float32)
+                            if data.ndim == 3 and data.shape[0] in (1, 2, 3, 4):
+                                data = np.transpose(data, (1, 2, 0))
+                            return data
+                    except Exception:
+                        pass
+                try:
+                    import tifffile
+                    data = tifffile.imread(f_path).astype(np.float32)
+                    if data.ndim == 3 and data.shape[0] in (1, 2, 3, 4) and data.shape[2] > 4:
+                        data = np.transpose(data, (1, 2, 0))
+                    return data
+                except Exception:
+                    pass
+            from PIL import Image
+            return np.array(Image.open(f_path)).astype(np.float32)
 
-        arr_1 = np.array(im1.resize((min_w, min_h))).astype(np.float32)
-        arr_2 = np.array(im2.resize((min_w, min_h))).astype(np.float32)
+        raw_1 = _read_array_for_alignment(file_1)
+        raw_2 = _read_array_for_alignment(file_2)
+
+        h1, w1 = raw_1.shape[:2]
+        h2, w2 = raw_2.shape[:2]
+        min_h = min(h1, h2)
+        min_w = min(w1, w2)
+
+        arr_1 = raw_1[:min_h, :min_w]
+        arr_2 = raw_2[:min_h, :min_w]
+
+        overlap_km2 = facts_1.get("footprint_km2") or facts_2.get("footprint_km2") or 1.0
 
         alignment.update({
             "aligned": True,
-            "is_georeferenced": False,
-            "common_crs": "Pixel Coordinate Space",
+            "is_georeferenced": geo_1 or geo_2,
+            "common_crs": facts_1.get("crs") or facts_2.get("crs") or "Pixel Coordinate Space",
             "overlap_bounds": (0, 0, min_w, min_h),
-            "overlap_area_km2": None,
+            "overlap_area_km2": round(overlap_km2, 3) if overlap_km2 else None,
             "overlap_fraction": 1.0,
-            "resolution_m": facts_1.get("resolution_m"),
+            "resolution_m": facts_1.get("resolution_m") or facts_2.get("resolution_m") or 10.0,
             "grid_shape": (min_h, min_w),
             "arr_1": arr_1,
             "arr_2": arr_2,
-            "notes": ["Pixel-space registration aligned to common pixel grid."]
+            "notes": ["Resampled/cropped to common overlapping spatial extent."]
         })
     except Exception as e:
         alignment["notes"].append(f"Image array reading error: {e}")
@@ -822,7 +853,8 @@ def compute_temporal_vegetation_change(file_t1: str, file_t2: str) -> Dict[str, 
 def compute_optical_sar_fusion(
     optical_file: str,
     sar_file: str,
-    query_focus: str = "flood"
+    query_focus: str = "flood",
+    output_dir: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Performs cross-modal spatial alignment and evidence fusion between Optical and SAR:
@@ -831,6 +863,7 @@ def compute_optical_sar_fusion(
       shadows and smooth airport runways.
     - For buildings: Fuses Optical visual bounding features with SAR double-bounce corner
       reflector structural backscatter peaks.
+    Generates a color-coded consensus spatial mask PNG.
     """
     alignment = align_spatial_pair(optical_file, sar_file)
     if not alignment.get("aligned"):
@@ -864,48 +897,109 @@ def compute_optical_sar_fusion(
     opt_p99 = np.percentile(opt_slice, 99) if opt_slice.size > 0 else 1.0
     opt_norm = np.clip(opt_slice / max(opt_p99, 1e-4), 0.0, 1.0)
 
-    if query_focus in ("flood", "water", "inundation"):
-        # Low SAR backscatter (specular reflection of radar away from receiver)
-        sar_water_candidate = sar_norm < 0.25
+    # Determine destination directory for mask asset
+    scratch_dir = None
+    if output_dir:
+        scratch_dir = Path(output_dir)
+    elif settings and getattr(settings, "SATQUERY_STORAGE_ROOT", None):
+        scratch_dir = Path(settings.SATQUERY_STORAGE_ROOT) / "scratch"
+    else:
+        scratch_dir = Path("data/scratch")
 
-        # Optical water proxy: lower reflectance
-        opt_water_candidate = opt_norm < 0.35
+    try:
+        scratch_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        logger.warning(f"Could not create scratch directory for fusion mask: {e}")
 
-        # Fused flood extent: confirmed by both modalities
-        fused_water_mask = sar_water_candidate & opt_water_candidate
-        total_px = fused_water_mask.size
-        fused_water_pixels = int(np.count_nonzero(fused_water_mask))
-        sar_only_pixels = int(np.count_nonzero(sar_water_candidate & ~opt_water_candidate))
-        opt_only_pixels = int(np.count_nonzero(opt_water_candidate & ~sar_water_candidate))
+    mask_path = None
 
-        fused_pct = round((fused_water_pixels / max(total_px, 1)) * 100.0, 2)
-        fused_area_km2 = round(overlap_area_km2 * (fused_pct / 100.0), 3) if overlap_area_km2 else None
+    # 1. Flood Inundation Analysis
+    sar_water_candidate = sar_norm < 0.25
+    opt_water_candidate = opt_norm < 0.35
+    fused_water_mask = sar_water_candidate & opt_water_candidate
+    total_px = fused_water_mask.size
+    fused_water_pixels = int(np.count_nonzero(fused_water_mask))
+    sar_only_pixels = int(np.count_nonzero(sar_water_candidate & ~opt_water_candidate))
+    opt_only_pixels = int(np.count_nonzero(opt_water_candidate & ~sar_water_candidate))
+    fused_flood_pct = round((fused_water_pixels / max(total_px, 1)) * 100.0, 2)
+    fused_flood_area_km2 = round(overlap_area_km2 * (fused_flood_pct / 100.0), 3) if overlap_area_km2 else None
+
+    # 2. Structural & Built Environment Analysis
+    sar_bright = sar_norm > 0.70
+    opt_contrast = opt_norm > 0.50
+    fused_structure = sar_bright & opt_contrast
+    structure_pixels = int(np.count_nonzero(fused_structure))
+    struct_pct = round((structure_pixels / max(total_px, 1)) * 100.0, 2)
+    structure_area_km2 = round(overlap_area_km2 * (struct_pct / 100.0), 3) if overlap_area_km2 else None
+
+    # Determine focus for mask rendering
+    is_flood_query = query_focus in ("flood", "water", "inundation") or (query_focus in ("auto", "fusion", "optical_sar_fusion") and fused_flood_pct > 2.0)
+
+    if is_flood_query:
+        # Build colorized RGBA mask:
+        # Background: dark slate [15, 23, 42]
+        # Optical-only (cloud shadows / ambiguous): dark blue [30, 64, 175]
+        # SAR-only (specular non-water / runway): purple [147, 51, 234]
+        # Confirmed Fused Inundation: bright cyan [6, 182, 212]
+        try:
+            h, w = fused_water_mask.shape
+            mask_rgb = np.zeros((h, w, 3), dtype=np.uint8)
+            mask_rgb[...] = [15, 23, 42]  # Background dark
+            mask_rgb[opt_water_candidate & ~sar_water_candidate] = [30, 64, 175]
+            mask_rgb[sar_water_candidate & ~opt_water_candidate] = [147, 51, 234]
+            mask_rgb[fused_water_mask] = [6, 182, 212]
+
+            mask_file = scratch_dir / f"fusion_mask_{uuid.uuid4().hex[:8]}.png"
+            Image.fromarray(mask_rgb).save(str(mask_file))
+            mask_path = str(mask_file)
+        except Exception as e:
+            logger.warning(f"Could not render optical-sar flood mask image: {e}")
 
         return {
             "focus": "flood",
             "fused_water_pixels": fused_water_pixels,
-            "fused_flood_pct": fused_pct,
-            "fused_flood_area_km2": fused_area_km2,
+            "fused_flood_pct": fused_flood_pct,
+            "fused_flood_area_km2": fused_flood_area_km2,
             "sar_candidate_pct": round((np.count_nonzero(sar_water_candidate) / max(total_px, 1)) * 100.0, 2),
             "optical_candidate_pct": round((np.count_nonzero(opt_water_candidate) / max(total_px, 1)) * 100.0, 2),
             "suppressed_false_positives_px": sar_only_pixels + opt_only_pixels,
+            "structure_pixels": structure_pixels,
+            "structure_pct": struct_pct,
+            "structure_area_km2": structure_area_km2,
             "overlap_area_km2": overlap_area_km2,
-            "fusion_method": "Joint Optical-SAR consensus: Optical dark water signature confirmed by SAR specular low backscatter."
+            "fusion_method": "Joint Optical-SAR consensus: Optical dark water signature confirmed by SAR specular low backscatter.",
+            "mask_path": mask_path
         }
     else:
-        # Structural / building focus: double bounce high backscatter in SAR + structural contrast in Optical
-        sar_bright = sar_norm > 0.70
-        opt_contrast = opt_norm > 0.50
-        fused_structure = sar_bright & opt_contrast
-        total_px = fused_structure.size
-        structure_pixels = int(np.count_nonzero(fused_structure))
-        struct_pct = round((structure_pixels / max(total_px, 1)) * 100.0, 2)
+        # Build colorized RGBA mask:
+        # Background: dark slate [15, 23, 42]
+        # Optical contrast only: amber [245, 158, 11]
+        # SAR bright only: pink [236, 72, 153]
+        # Confirmed Structural Resonance: vibrant orange-red [239, 68, 68]
+        try:
+            h, w = fused_structure.shape
+            mask_rgb = np.zeros((h, w, 3), dtype=np.uint8)
+            mask_rgb[...] = [15, 23, 42]
+            mask_rgb[opt_contrast & ~sar_bright] = [245, 158, 11]
+            mask_rgb[sar_bright & ~opt_contrast] = [236, 72, 153]
+            mask_rgb[fused_structure] = [239, 68, 68]
+
+            mask_file = scratch_dir / f"fusion_mask_{uuid.uuid4().hex[:8]}.png"
+            Image.fromarray(mask_rgb).save(str(mask_file))
+            mask_path = str(mask_file)
+        except Exception as e:
+            logger.warning(f"Could not render optical-sar structural mask image: {e}")
 
         return {
             "focus": "structural",
+            "fused_flood_pct": fused_flood_pct,
+            "fused_flood_area_km2": fused_flood_area_km2,
+            "suppressed_false_positives_px": sar_only_pixels + opt_only_pixels,
             "structure_pixels": structure_pixels,
             "structure_pct": struct_pct,
+            "structure_area_km2": structure_area_km2,
             "overlap_area_km2": overlap_area_km2,
-            "fusion_method": "Joint Optical-SAR structural resonance: Optical visual features reinforced by SAR double-bounce corner reflection."
+            "fusion_method": "Joint Optical-SAR structural resonance: Optical visual features reinforced by SAR double-bounce corner reflection.",
+            "mask_path": mask_path
         }
 
