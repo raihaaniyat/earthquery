@@ -95,6 +95,36 @@ def root():
     }
 
 
+def _detect_hardware_info() -> Dict[str, Any]:
+    gpu_name = "CPU Only"
+    cuda_available = False
+    cuda_version = None
+    try:
+        import subprocess
+        res = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name,driver_version", "--format=csv,noheader"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=3
+        )
+        out = res.stdout.strip().split("\n")[0]
+        if out and "," in out:
+            parts = [p.strip() for p in out.split(",")]
+            gpu_name = parts[0]
+            cuda_available = True
+            cuda_version = parts[1]
+    except Exception:
+        pass
+
+    return {
+        "gpu_name": gpu_name,
+        "cuda_available": cuda_available,
+        "cuda_version": cuda_version,
+        "runtime_environment": "satquery-api (Python 3.11)",
+    }
+
+
 @app.get("/api/health")
 def legacy_health():
     db_status = check_db_connection()
@@ -102,13 +132,7 @@ def legacy_health():
 
     return {
         "status": "healthy",
-        "hardware": {
-            "gpu_name": "NVIDIA GeForce RTX 5060 Laptop GPU",
-            "cuda_available": True,
-            "cuda_version": "13.0",
-            "compute_capability": [12, 0],
-            "runtime_environment": "satquery-api (Python 3.11)",
-        },
+        "hardware": _detect_hardware_info(),
         "services": {
             "database_postgis": db_status,
             "redis_queue": redis_status,
