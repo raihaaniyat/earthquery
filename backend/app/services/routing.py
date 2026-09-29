@@ -174,6 +174,7 @@ def parse_user_intent(
     is_optical_sar = bool(pair and pair.purpose == "optical_sar") or (
         len(manifests) >= 2 and any(m.modality == "sar" for m in manifests) and any(m.modality == "optical" for m in manifests)
     )
+    is_multimodal = is_optical_sar
 
     requested_measurements: List[str] = []
     output_type: str = "narrative"
@@ -281,13 +282,14 @@ def parse_user_intent(
         requested_measurements = ["ndvi"]
         summary_goal = "Deterministic spectral index computation with histogram distribution and threshold exceedance."
 
-    # 4. Optical + SAR Multimodal Queries (Placed before temporal comparison so multimodal phrasing like 'fusion between the two' is prioritized)
+    # 6. Optical + SAR Multimodal Queries (Placed before temporal comparison so multimodal phrasing like 'fusion between the two' is prioritized)
     elif is_optical_sar or (pair and pair.purpose == "optical_sar") or any(m in q_lower for m in ["optical-sar", "optical_sar", "sar-optical", "croma"]) or (
         any(m in q_lower for m in ["sar", "radar"]) and any(m in q_lower for m in ["optical", "rgb", "multispectral", "both", "fusion", "two", "between"])
     ) or (
         "fusion" in q_lower and any(m in q_lower for m in ["sar", "radar", "optical", "two", "between"])
     ):
         is_multimodal = True
+        is_optical_sar = True
         if any(f in q_lower for f in ["flood", "water", "inundat", "overflow"]):
             intent = "optical_sar_flood"
             target_focus = "flood"
@@ -313,10 +315,10 @@ def parse_user_intent(
             requested_measurements = ["multimodal_features", "primary_class", "change_vqa_answer"]
             summary_goal = "Joint optical and SAR feature representation, cross-sensor surface classification, and multimodal reasoning."
 
-    # 6. Temporal Comparison Queries (ONLY when query specifically asks about change or comparison)
+    # 7. Temporal Comparison Queries (ONLY when query specifically asks about change or comparison)
     elif len(manifests) >= 2 and (is_change_query or any(k in q_lower for k in ["compare", "difference", "earlier", "later", "what changed", "two dates", "between", "lost"])):
         is_temporal = True
-        # 6a. Temporal Building Change / Construction
+        # 7a. Temporal Building Change / Construction
         if any(b in q_lower for b in ["building", "structure", "house", "construction", "built-up", "urban development", "expansion"]):
             intent = "temporal_building_change"
             target_focus = "buildings"
@@ -326,7 +328,7 @@ def parse_user_intent(
             requested_measurements = ["new_building_count", "unchanged_building_count", "disappeared_building_count"]
             summary_goal = "Compare aligned temporal observations, match spatial building objects, and report newly appeared vs unchanged structures."
 
-        # 6b. Temporal Vegetation Loss / Deforestation
+        # 7b. Temporal Vegetation Loss / Deforestation
         elif any(v in q_lower for v in ["vegetation", "forest", "tree", "greenery", "deforestation", "canopy"]):
             intent = "temporal_vegetation_loss"
             target_focus = "vegetation"
@@ -336,7 +338,7 @@ def parse_user_intent(
             requested_measurements = ["lost_vegetation_area_km2", "loss_pct_of_baseline"]
             summary_goal = "Calculate comparative vegetation loss and area change between spatially aligned temporal observations."
 
-        # 6c. General Temporal Change Detection
+        # 7c. General Temporal Change Detection
         else:
             intent = "change_detection"
             target_focus = "general_change"
@@ -346,7 +348,7 @@ def parse_user_intent(
             requested_measurements = ["bitemporal_difference", "changed_area_km2"]
             summary_goal = "Spatially align observations to common footprint and synthesize comparative change dynamics."
 
-    # 5. Object Detection / Visual Grounding Intent
+    # 8. Object Detection / Visual Grounding Intent
     elif any(k in q_lower for k in ["locate", "detect", "ground", "where are", "count", "bounding box", "owlv2", "owl", "geoground"]) or (
         "find" in q_lower and any(obj in q_lower for obj in ["building", "vehicle", "ship", "car", "plane", "aircraft", "structure", "road", "solar", "tank"])
     ) or any(phrase in q_lower for phrase in ["how many buildings", "how many vehicles", "how many ships", "how many planes", "how many structures"]):
@@ -358,7 +360,7 @@ def parse_user_intent(
         requested_measurements = ["object_count"]
         summary_goal = "Detect, localize, and count target physical features using open-vocabulary visual grounding."
 
-    # 6. Classification / Land Cover Segmentation Intent
+    # 9. Classification / Land Cover Segmentation Intent
     elif any(k in q_lower for k in ["classify", "land cover", "segment", "segmentation", "classes", "vegetation, water", "land-cover"]):
         intent = "classification"
         target_focus = "land_cover"
@@ -368,7 +370,7 @@ def parse_user_intent(
         requested_measurements = ["class_distribution"]
         summary_goal = "Segment and quantify surface land cover categories."
 
-    # 6d. Single-scene SAR Description (CROMA-Base or deterministic SAR backscatter)
+    # 10. Single-scene SAR Description (CROMA-Base or deterministic SAR backscatter)
     elif is_sar_scene and not is_optical_sar:
         intent = "sar_scene_description"
         target_focus = "sar"
@@ -378,7 +380,7 @@ def parse_user_intent(
         requested_measurements = ["backscatter_mean", "polarization"]
         summary_goal = "Provide expert Synthetic Aperture Radar (SAR) backscatter interpretation answering the specific inquiry."
 
-    # 7. Scene Description / General VQA Intent
+    # 11. Scene Description / General VQA Intent
     else:
         intent = "scene_description"
         target_focus = "general"
@@ -392,7 +394,7 @@ def parse_user_intent(
         target_focus=target_focus,
         inputs=scene_ids,
         is_temporal=is_temporal,
-        is_multimodal=is_optical_sar,
+        is_multimodal=is_multimodal,
         operations=operations,
         required_models=required_models,
         output_requirements=requested_measurements + [output_type],
