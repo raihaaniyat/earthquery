@@ -234,6 +234,7 @@ async def poll_job_or_format(
                     diagnostic_override=fallback_params.get("diagnostic_override")
                 )
                 response["summary"] = fallback_res.get("summary", "")
+                response["supporting_findings"] = fallback_res.get("supporting_findings", [])
                 response["findings"] = fallback_res.get("findings", [])
                 response["sections"] = fallback_res.get("sections", {})
                 if fallback_res.get("participating_models"):
@@ -287,6 +288,11 @@ async def poll_job_or_format(
                 response["sections"] = exec_result["sections"]
             elif result.get("sections"):
                 response["sections"] = result["sections"]
+
+            if exec_result.get("supporting_findings"):
+                response["supporting_findings"] = exec_result["supporting_findings"]
+            elif result.get("supporting_findings"):
+                response["supporting_findings"] = result["supporting_findings"]
 
             if exec_result.get("participating_models"):
                 response["model"] = " + ".join(exec_result["participating_models"])
@@ -609,7 +615,11 @@ def get_system_status():
 
 
 def generate_raster_preview(tif_path: str) -> Optional[str]:
-    """Generates an 8-bit RGB normalized PNG preview for multi-band or floating-point GeoTIFFs."""
+    """
+    Generates an 8-bit normalized PNG preview for multi-band, floating-point, or SAR GeoTIFFs.
+    Uses out_shape downsampled read to avoid memory overhead on large rasters,
+    and 2nd-98th percentile stretching per band for scientific contrast.
+    """
     thumb_dir = os.path.join(SCRATCH_DIR, "thumbs")
     os.makedirs(thumb_dir, exist_ok=True)
     thumb_path = os.path.join(thumb_dir, f"{Path(tif_path).name}.png")
@@ -618,29 +628,86 @@ def generate_raster_preview(tif_path: str) -> Optional[str]:
 
     try:
         import rasterio
+        from rasterio.enums import Resampling
         from PIL import Image
         import numpy as np
+
         with rasterio.open(tif_path) as src:
             count = src.count
-            if count >= 3:
-                arr = src.read([1, 2, 3])
-                arr = np.transpose(arr, (1, 2, 0))
+            orig_w, orig_h = src.width, src.height
+            max_dim = 1280
+            if orig_w > max_dim or orig_h > max_dim:
+                scale = max_dim / max(orig_w, orig_h)
+                target_w = max(64, int(orig_w * scale))
+                target_h = max(64, int(orig_h * scale))
             else:
-                arr = src.read(1)
+                target_w, target_h = orig_w, orig_h
 
-            if arr.dtype != np.uint8:
-                valid = arr[np.isfinite(arr)]
-                if len(valid) > 0:
+            nodata = src.nodata
+
+            if count >= 3:
+                # Select optical RGB bands
+                if count >= 12:
+                    # Sentinel-2: Band 4 (Red), Band 3 (Green), Band 2 (Blue)
+                    band_idx = [4, 3, 2]
+                else:
+                    band_idx = [1, 2, 3]
+
+                arr = src.read(band_idx, out_shape=(3, target_h, target_w), resampling=Resampling.bilinear)
+                channels = []
+                for c in range(3):
+                    ch = arr[c].astype(np.float32)
+                    valid_mask = np.isfinite(ch)
+                    if nodata is not None:
+                        valid_mask &= (ch != nodata)
+                    valid = ch[valid_mask]
+                    if len(valid) > 10:
+                        p2, p98 = np.percentile(valid, (2, 98))
+                        if p98 > p2:
+                            scaled = np.clip((ch - p2) / (p98 - p2) * 255.0, 0, 255).astype(np.uint8)
+                        else:
+                            scaled = np.zeros_like(ch, dtype=np.uint8)
+                    else:
+                        scaled = np.clip(ch, 0, 255).astype(np.uint8)
+                    channels.append(scaled)
+
+                rgb = np.stack(channels, axis=-1)
+                img = Image.fromarray(rgb, mode="RGB")
+
+            elif count == 2:
+                # Dual polarization SAR (e.g. VV / VH)
+                arr = src.read(1, out_shape=(target_h, target_w), resampling=Resampling.bilinear).astype(np.float32)
+                valid_mask = np.isfinite(arr)
+                if nodata is not None:
+                    valid_mask &= (arr != nodata)
+                valid = arr[valid_mask]
+                if len(valid) > 10:
                     p2, p98 = np.percentile(valid, (2, 98))
                     if p98 > p2:
-                        arr = np.clip((arr - p2) / (p98 - p2) * 255.0, 0, 255).astype(np.uint8)
+                        scaled = np.clip((arr - p2) / (p98 - p2) * 255.0, 0, 255).astype(np.uint8)
                     else:
-                        arr = np.zeros_like(arr, dtype=np.uint8)
+                        scaled = np.zeros_like(arr, dtype=np.uint8)
                 else:
-                    arr = np.zeros_like(arr, dtype=np.uint8)
+                    scaled = np.clip(arr, 0, 255).astype(np.uint8)
+                img = Image.fromarray(scaled, mode="L")
 
-            img = Image.fromarray(arr)
-            img.thumbnail((800, 800), Image.Resampling.LANCZOS)
+            else:
+                # Single band (Grayscale, SAR, Elevation, Index)
+                arr = src.read(1, out_shape=(target_h, target_w), resampling=Resampling.bilinear).astype(np.float32)
+                valid_mask = np.isfinite(arr)
+                if nodata is not None:
+                    valid_mask &= (arr != nodata)
+                valid = arr[valid_mask]
+                if len(valid) > 10:
+                    p2, p98 = np.percentile(valid, (2, 98))
+                    if p98 > p2:
+                        scaled = np.clip((arr - p2) / (p98 - p2) * 255.0, 0, 255).astype(np.uint8)
+                    else:
+                        scaled = np.zeros_like(arr, dtype=np.uint8)
+                else:
+                    scaled = np.clip(arr, 0, 255).astype(np.uint8)
+                img = Image.fromarray(scaled, mode="L")
+
             img.save(thumb_path, format="PNG")
             return thumb_path
     except Exception as e:
@@ -667,7 +734,7 @@ def cleanup_old_scratch_files(max_age_hours: int = 24) -> None:
         logger.debug(f"Scratch cleanup skipped: {e}")
 
 
-# ----- Output Asset Serving -----
+# ----- Output Asset Serving & GeoTIFF Preview -----
 
 @router.get("/assets/{file_path:path}")
 def get_asset_file(file_path: str, preview: Optional[bool] = None, raw: Optional[bool] = None):
@@ -690,6 +757,11 @@ def get_asset_file(file_path: str, preview: Optional[bool] = None, raw: Optional
             found_candidate = str(matches[0])
 
     if not found_candidate:
+        matches_up = list(Path(UPLOAD_DIR).glob(f"**/{file_path}"))
+        if matches_up and matches_up[0].is_file():
+            found_candidate = str(matches_up[0])
+
+    if not found_candidate:
         raise HTTPException(status_code=404, detail="Asset not found")
 
     is_tif = found_candidate.lower().endswith((".tif", ".tiff"))
@@ -699,6 +771,60 @@ def get_asset_file(file_path: str, preview: Optional[bool] = None, raw: Optional
             return FileResponse(preview_png, media_type="image/png")
 
     return FileResponse(found_candidate)
+
+
+@router.post("/geotiff/preview")
+async def preview_geotiff(request: Request):
+    """
+    Accepts an uploaded GeoTIFF file or file_path reference, generates a visual PNG preview,
+    extracts metadata (CRS, bounds, dimensions, bands), and returns unified asset representation.
+    """
+    parsed_data, saved_paths = await parse_request_data_and_files(request)
+
+    target_path = None
+    if saved_paths:
+        target_path = saved_paths[0]
+    elif parsed_data.get("file_path"):
+        cand = parsed_data["file_path"]
+        if os.path.isfile(cand):
+            target_path = cand
+        elif os.path.isfile(os.path.join(UPLOAD_DIR, cand)):
+            target_path = os.path.join(UPLOAD_DIR, cand)
+        elif os.path.isfile(os.path.join(SCRATCH_DIR, cand)):
+            target_path = os.path.join(SCRATCH_DIR, cand)
+
+    if not target_path or not os.path.isfile(target_path):
+        raise HTTPException(status_code=400, detail="No GeoTIFF file uploaded or found.")
+
+    facts = extract_geotiff_facts(target_path)
+    preview_png = generate_raster_preview(target_path)
+    filename = Path(target_path).name
+
+    is_sar = False
+    name_lower = filename.lower()
+    sensor_lower = str(facts.get("sensor_inferred", "")).lower()
+    if any(k in name_lower or k in sensor_lower for k in ("sar", "sentinel-1", "s1", "nisar", "grd", "slc")):
+        is_sar = True
+
+    preview_url = f"/api/assets/thumbs/{filename}.png" if preview_png else f"/api/assets/{filename}?preview=true"
+
+    return {
+        "status": "success",
+        "filename": filename,
+        "file_path": target_path,
+        "preview_url": preview_url,
+        "previewUrl": preview_url,
+        "width": facts.get("width", 0),
+        "height": facts.get("height", 0),
+        "bands": facts.get("bands", 1),
+        "crs": facts.get("crs"),
+        "bounds": facts.get("bounds"),
+        "resolution_m": facts.get("resolution_m"),
+        "sensor": facts.get("sensor_inferred"),
+        "is_sar": is_sar,
+        "isSar": is_sar,
+        "is_georeferenced": facts.get("is_georeferenced", False)
+    }
 
 
 # =============================================================
@@ -745,15 +871,21 @@ async def create_conversation(
     conv_id = data.get("id") or data.get("conversation_id") or str(uuid.uuid4())
     title = data.get("title") or "New Analysis Conversation"
     conv = ConversationEngine.get_or_create_conversation(db, conversation_id=conv_id, title=title)
-    return {
+    conv_dict = {
         "id": conv.id,
         "title": conv.title,
         "state_revision": conv.state_revision,
         "created_at": conv.created_at.isoformat() if conv.created_at else None,
         "updated_at": conv.updated_at.isoformat() if conv.updated_at else None,
+    }
+    return {
+        **conv_dict,
+        "conversation": conv_dict,
         "messages": [],
+        "datasets": [],
         "active_context": json.loads(conv.active_context_json or "{}"),
-        "pending_task": None
+        "pending_task": None,
+        "latest_map_action": None
     }
 
 
@@ -794,6 +926,7 @@ def get_conversation_snapshot(
             "created_at": m.created_at.isoformat() if m.created_at else None,
             "metadata": meta,
             "summary": meta.get("summary") or (m.content if m.role == "assistant" else None),
+            "supporting_findings": meta.get("supporting_findings", []),
             "findings": meta.get("findings", []),
             "sections": meta.get("sections", {}),
             "model": meta.get("model", ""),
@@ -1038,9 +1171,10 @@ async def execute_conversation_turn(
         model_id = routed.get("target_model_id", target_model or "Task Router")
 
         # If lightweight action executed, result is already directly available in routed_result
-        if turn_action in ("saved_fact", "map_action", "explanation", "parameter_modification", "spatial_proximity", "clarification"):
+        if turn_action in ("saved_fact", "map_action", "explanation", "parameter_modification", "spatial_proximity", "clarification", "conversational_followup"):
             formatted_res = {
                 "summary": routed_result.get("summary", ""),
+                "supporting_findings": routed_result.get("supporting_findings", []),
                 "findings": routed_result.get("findings", []),
                 "sections": routed_result.get("sections", {}),
                 "model": routed_result.get("model", model_id),
@@ -1061,6 +1195,7 @@ async def execute_conversation_turn(
             formatted_res = await poll_job_or_format(routed_result, model_id, fallback_params=fallback_params)
 
         summary = formatted_res.get("summary", "")
+        supporting_findings = formatted_res.get("supporting_findings", [])
         findings = formatted_res.get("findings", [])
         sections = formatted_res.get("sections", {})
         mask_url = formatted_res.get("maskUrl")
@@ -1070,7 +1205,11 @@ async def execute_conversation_turn(
         # If this turn produced analytical findings or a mask, record a ConversationResult
         turn.turn_type = turn_action
         if turn_action in ("new_analysis", "pending_input_continuation") and (findings or mask_url or summary):
-            is_first = active_context.get("original_result_id") is None
+            asst_count = db.query(ConversationMessage).filter(
+                ConversationMessage.conversation_id == conversation_id,
+                ConversationMessage.role == "assistant"
+            ).count()
+            is_first = (active_context.get("original_result_id") is None) or (asst_count == 0)
             result_role = "original" if is_first else "derived"
             parent_id = None if is_first else active_context.get("current_result_id")
 
@@ -1128,6 +1267,7 @@ async def execute_conversation_turn(
         asst_msg_id = str(uuid.uuid4())
         msg_meta = {
             "summary": summary,
+            "supporting_findings": supporting_findings,
             "findings": findings,
             "sections": sections,
             "model": formatted_res.get("model", model_id),
@@ -1170,6 +1310,7 @@ async def execute_conversation_turn(
                 "created_at": asst_msg.created_at.isoformat() if asst_msg.created_at else None
             },
             "summary": summary,
+            "supporting_findings": supporting_findings,
             "findings": findings,
             "sections": sections,
             "model": formatted_res.get("model", model_id),

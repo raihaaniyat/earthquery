@@ -43,6 +43,7 @@ venv.bak/
 *.tgz
 *.7z
 .cache/
+cache/
 models/**/.cache/
 models/**/download/
 models/**/trees/

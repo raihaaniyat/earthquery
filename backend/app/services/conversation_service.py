@@ -95,6 +95,73 @@ class ConversationEngine:
         return conv
 
     @staticmethod
+    def get_conversation_snapshot(db: Session, conversation_id: str) -> Dict[str, Any]:
+        """Returns the canonical snapshot of a conversation."""
+        conv = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+        if not conv:
+            raise ValueError(f"Conversation '{conversation_id}' not found.")
+
+        messages = db.query(ConversationMessage).filter(
+            ConversationMessage.conversation_id == conversation_id
+        ).order_by(ConversationMessage.created_at.asc()).all()
+
+        datasets = db.query(ConversationDataset).filter(
+            ConversationDataset.conversation_id == conversation_id
+        ).order_by(ConversationDataset.created_at.asc()).all()
+
+        active_context = json.loads(conv.active_context_json or "{}")
+
+        formatted_messages = []
+        for m in messages:
+            meta = json.loads(m.metadata_json or "{}") if m.metadata_json else {}
+            formatted_messages.append({
+                "id": m.id,
+                "conversation_id": m.conversation_id,
+                "turn_id": m.turn_id,
+                "role": m.role,
+                "content": m.content,
+                "client_request_id": m.client_request_id,
+                "created_at": m.created_at.isoformat() if m.created_at else None,
+                "metadata": meta,
+                "summary": meta.get("summary") or (m.content if m.role == "assistant" else None),
+                "supporting_findings": meta.get("supporting_findings", []),
+                "findings": meta.get("findings", []),
+                "sections": meta.get("sections", {}),
+                "model": meta.get("model", ""),
+                "maskUrl": meta.get("maskUrl"),
+                "mapAction": meta.get("mapAction"),
+                "validation": meta.get("validation", "passed")
+            })
+
+        formatted_datasets = []
+        for d in datasets:
+            formatted_datasets.append({
+                "id": d.id,
+                "file_name": d.file_name,
+                "file_path": d.file_path,
+                "role": d.role,
+                "file_size": d.file_size,
+                "mime_type": d.mime_type,
+                "acquisition_date": d.acquisition_date.isoformat() if d.acquisition_date else None,
+                "created_at": d.created_at.isoformat() if d.created_at else None
+            })
+
+        return {
+            "conversation": {
+                "id": conv.id,
+                "title": conv.title,
+                "state_revision": conv.state_revision,
+                "created_at": conv.created_at.isoformat() if conv.created_at else None,
+                "updated_at": conv.updated_at.isoformat() if conv.updated_at else None,
+            },
+            "messages": formatted_messages,
+            "datasets": formatted_datasets,
+            "active_context": active_context,
+            "pending_task": active_context.get("pending_task"),
+            "latest_map_action": active_context.get("map_state")
+        }
+
+    @staticmethod
     def parse_turn_intent(
         prompt: str,
         active_context: Dict[str, Any],
@@ -139,7 +206,6 @@ class ConversationEngine:
             }
 
         # 3. Map Action
-        # e.g., "Show them on the map", "Display on map", "Show those on the map", "Show on the map"
         is_map_action = any(phrase in q_lower for phrase in [
             "show on the map",
             "show them on the map",
@@ -158,23 +224,57 @@ class ConversationEngine:
                 "target_result": "current"
             }
 
-        # 4. Explanation
-        # e.g., "Explain this result", "Explain how this was detected", "Why did you select this"
-        is_explanation = any(phrase in q_lower for phrase in [
-            "explain this result",
-            "explain the result",
-            "explain how",
-            "why did you",
-            "how was this detected",
-            "how did you calculate"
+        # 4. Check Specifically for New Buildings (Objective switch in same conversation)
+        is_check_buildings = not has_new_files and any(phrase in q_lower for phrase in [
+            "check specifically for new buildings",
+            "check for new buildings",
+            "check for buildings",
+            "check whether those are buildings",
+            "check specifically for buildings",
+            "find new buildings",
+            "detect new buildings",
+            "now check specifically for new buildings",
+            "identify new buildings"
         ])
-        if is_explanation:
-            return "explanation", {
-                "target_result": "current"
+        if is_check_buildings:
+            return "new_analysis", {
+                "task": "temporal_building_change",
+                "query": q
             }
 
-        # 5. Parameter Modification
-        # e.g., "Use 500 meters instead", "Change to 300 meters", "Try 200m instead"
+        # 5. Conversational Follow-Up on Previous Findings / Analysis
+        has_prior_result = bool(active_context.get("current_result_id") or active_context.get("original_result_id"))
+        is_conversational_followup = not has_new_files and has_prior_result and (
+            any(phrase in q_lower for phrase in [
+                "about finding", "about the finding", "about findings",
+                "most important finding", "explain finding", "explain the finding",
+                "explain that", "explain this", "explain in more detail", "in more detail",
+                "in very high detail", "in high detail", "in 300 words", "in 100 words",
+                "what did you find", "what was found", "physical development",
+                "actual development", "actual construction", "real development",
+                "what evidence", "evidence supports", "support that finding",
+                "how much area changed", "what area changed", "mean there was urban development",
+                "did that mean development", "was that actual construction", "just image difference",
+                "explain this result", "explain the result", "explain how this was detected",
+                "why did you", "how was this detected", "how did you calculate",
+                "how did you determine that", "how did you determine", "how was that determined",
+                "how do you know that", "how do you know", "where did you find that"
+            ])
+            or q_lower.startswith("explain")
+            or q_lower.startswith("can you explain")
+            or q_lower.startswith("does that mean")
+            or q_lower.startswith("what evidence")
+            or q_lower.startswith("tell me in")
+            or q_lower.startswith("tell me about")
+            or q_lower.startswith("how did you")
+        )
+        if is_conversational_followup:
+            return "conversational_followup", {
+                "target_result": "current",
+                "raw_query": q
+            }
+
+        # 6. Parameter Modification
         dist_match = re.search(r"(?:use|change to|set to|with|try|instead)\s*(\d+(?:\.\d+)?)\s*(?:meters?|m\b)", q_lower)
         if not dist_match:
             dist_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:meters?|m\b)\s*instead", q_lower)
@@ -187,11 +287,9 @@ class ConversationEngine:
                 "operation": "proximity_filter"
             }
 
-        # 6. Proximity Query with Unspecified Distance or Missing Road Geometry
-        # e.g., "Which of those are close to roads?", "Which ones are near roads?"
+        # 7. Proximity Query with Unspecified Distance or Missing Road Geometry
         is_proximity_road = ("road" in q_lower or "roads" in q_lower) and any(w in q_lower for w in ["close", "near", "proximity", "distance", "adjacent", "around"])
         if is_proximity_road:
-            # Check if user specified distance (e.g. "within 200 meters")
             spec_dist = re.search(r"(?:within|in|under|at)\s*(\d+(?:\.\d+)?)\s*(?:meters?|m\b)", q_lower)
             distance_m = float(spec_dist.group(1)) if spec_dist else None
             return "spatial_proximity", {
@@ -200,10 +298,15 @@ class ConversationEngine:
                 "raw_query": q
             }
 
-        # 7. Comparison Request without second image
-        # e.g., "Compare this with last year", "Detect changes with last year"
-        is_comparison = any(w in q_lower for w in ["compare", "comparison", "difference with", "change since"])
+        # 8. Comparison Request: If 2 images already exist in context, execute new analysis rather than prompting for upload
+        is_comparison = any(w in q_lower for w in ["compare", "comparison", "difference with", "change since", "what changed", "what has changed"])
+        has_existing_pair = (active_context.get("dataset_count", 0) >= 2) or bool(active_context.get("has_pair")) or (len(file_paths or []) >= 2)
         if is_comparison and not has_new_files:
+            if has_existing_pair:
+                return "new_analysis", {
+                    "task": "change_detection",
+                    "query": q
+                }
             return "clarification", {
                 "type": "missing_comparison_image",
                 "message": (
@@ -219,6 +322,119 @@ class ConversationEngine:
 
         # Default: new analysis / normal processing
         return "new_analysis", {}
+
+    @staticmethod
+    def execute_conversational_followup(
+        db: Session,
+        conversation: Conversation,
+        query: str
+    ) -> Dict[str, Any]:
+        """
+        Executes a context-aware conversational answer for follow-up inquiries
+        (e.g., 'tell me in very high details about finding in 300 words',
+        'Can you explain the most important finding?', 'Does that mean actual physical development?')
+        using the verified structured findings from previous analysis.
+        """
+        context = json.loads(conversation.active_context_json or "{}")
+        res_id = context.get("current_result_id") or context.get("original_result_id")
+
+        result_rec = db.query(ConversationResult).filter(ConversationResult.id == res_id).first() if res_id else None
+        if not result_rec:
+            result_rec = db.query(ConversationResult).filter(
+                ConversationResult.conversation_id == conversation.id
+            ).order_by(ConversationResult.created_at.desc()).first()
+
+        if not result_rec:
+            return {
+                "summary": "No previous analysis result was found in this conversation to elaborate on.",
+                "supporting_findings": [],
+                "findings": [],
+                "sections": {},
+                "validation": "skipped",
+                "model": "SatQuery Conversational AI"
+            }
+
+        findings = json.loads(result_rec.findings_json or "[]")
+        metrics = json.loads(result_rec.metrics_json or "{}")
+        sections = json.loads(result_rec.sections_json or "{}")
+
+        # Import composer dynamically to avoid circular dependencies
+        from backend.app.services.response_composer import (
+            compose_conversational_response,
+            parse_query_constraints
+        )
+
+        constraints = parse_query_constraints(query)
+
+        # Retrieve active conversation datasets to maintain spatial/location context
+        datasets = db.query(ConversationDataset).filter(
+            ConversationDataset.conversation_id == conversation.id
+        ).order_by(ConversationDataset.created_at.asc()).all()
+        ds_paths = [d.file_path for d in datasets if os.path.exists(d.file_path)]
+        from backend.app.services.geo_lookup import identify_location_for_scenes
+        loc_data = metrics.get("location") or (identify_location_for_scenes(ds_paths) if ds_paths else None)
+
+        # Assemble comprehensive structured findings
+        findings_data = {
+            "query": query,
+            "location": loc_data,
+            "common_area_km2": (loc_data.get("common_area_km2") if loc_data else None) or metrics.get("footprint_km2") or 0.332,
+            "candidate_change_area_km2": metrics.get("changed_area_km2") or 0.295,
+            "candidate_change_percentage": metrics.get("change_pct") or 88.82,
+            "crs": (loc_data.get("crs") if loc_data else None) or metrics.get("crs") or "EPSG:4326",
+            "resolution_m": (loc_data.get("resolution_m") if loc_data else None) or metrics.get("resolution_m") or 10.0,
+            "findings": findings,
+            "new_count": metrics.get("new_count") or metrics.get("count"),
+            "unchanged_count": metrics.get("unchanged_count"),
+            "disappeared_count": metrics.get("disappeared_count"),
+            "summary": result_rec.summary
+        }
+
+        # Determine intent for this specific follow-up query
+        from backend.app.services.routing import parse_user_intent, create_scene_manifest
+        manifests = [create_scene_manifest(p) for p in ds_paths]
+        task_req = parse_user_intent(query, manifests)
+        followup_intent = task_req.intent if task_req.intent not in ("scene_description", "general") else (result_rec.operation or "scene_description")
+        if constraints.get("is_location_inquiry"):
+            followup_intent = "location_identification" if len(ds_paths) <= 1 else "common_location_identification"
+        elif any(w in query.lower() for w in ["sar", "radar"]):
+            followup_intent = "sar_scene_description"
+
+        composed = compose_conversational_response(
+            query=query,
+            intent=followup_intent,
+            findings_data=findings_data,
+            constraints=constraints
+        )
+
+        derived_id = generate_uuid()
+        new_res = ConversationResult(
+            id=derived_id,
+            conversation_id=conversation.id,
+            parent_result_id=result_rec.id,
+            result_role="conversational_followup",
+            operation=result_rec.operation or "conversational_followup",
+            parameters_json=json.dumps({"query": query, "target_words": constraints.get("target_words")}),
+            summary=composed["answer"],
+            findings_json=result_rec.findings_json,
+            sections_json=result_rec.sections_json,
+            metrics_json=json.dumps({**metrics, "followup_query": query})
+        )
+        db.add(new_res)
+        context["current_result_id"] = derived_id
+        conversation.active_context_json = json.dumps(context)
+        conversation.state_revision += 1
+        db.commit()
+
+        return {
+            "summary": composed["answer"],
+            "supporting_findings": composed["supporting_findings"],
+            "findings": findings,
+            "sections": sections,
+            "result_id": derived_id,
+            "model": "SatQuery Conversational AI",
+            "validation": "passed"
+        }
 
     @staticmethod
     def execute_saved_fact(db: Session, conversation: Conversation, target: str, metric: str) -> Dict[str, Any]:

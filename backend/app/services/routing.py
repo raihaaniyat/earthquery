@@ -178,8 +178,87 @@ def parse_user_intent(
     requested_measurements: List[str] = []
     output_type: str = "narrative"
 
-    # 1. Pure Raster Metadata Query (No vision models needed)
-    if any(k in q_lower for k in [
+    # Location intent detection
+    is_location_query = any(phrase in q_lower for phrase in [
+        "place name", "what place", "which place", "what is the place", "name of the place",
+        "where is this", "where was this", "where are these", "what city", "which city",
+        "what state", "which state", "what country", "which country", "tell me the country",
+        "tell me the place", "tell me the city", "tell me the state", "tell me country",
+        "place, city, state, country", "city, state, country", "city, state and country",
+        "place, city, state", "common place", "common location", "location of the image",
+        "location of these", "what location", "which location", "geographic location",
+        "where were these two images taken", "where are these two images taken",
+        "what place is shown in both", "what place is common", "place shown in both",
+        "place of the image"
+    ]) or ("place" in q_lower and any(w in q_lower for w in ["city", "country", "state", "shown", "both", "image"]))
+
+    is_change_query = any(phrase in q_lower for phrase in [
+        "what changed", "what has changed", "difference between", "how much area changed",
+        "change detection", "surface change", "demolition", "construction", "vegetation loss",
+        "deforestation", "new buildings", "built-up expansion", "what was changed", "changed between",
+        "finding in", "about finding", "about the finding", "about findings", "compare", "comparison"
+    ]) or ("change" in q_lower and not is_location_query)
+
+    # Detail Level extraction
+    if any(phrase in q_lower for phrase in ["very high detail", "very high details", "in-depth", "exhaustive", "comprehensive", "maximum detail", "deep analysis"]):
+        detail_level = "very_high"
+    elif any(phrase in q_lower for phrase in ["in detail", "in details", "detailed", "deep dive", "thoroughly"]):
+        detail_level = "high"
+    elif any(phrase in q_lower for phrase in ["briefly", "brief", "short", "in short", "summary", "summarize in one sentence", "give me only the answer", "quick"]):
+        detail_level = "concise"
+    else:
+        detail_level = "moderate"
+
+    # Requested length extraction (e.g. 500 words, 300 words, 100 words)
+    requested_length = None
+    import re
+    w_match = re.search(r"(?:in|about|approx|approximately|around|within)?\s*(\d+)\s*(?:words|word|w\b)", q_lower)
+    if w_match:
+        val = int(w_match.group(1))
+        requested_length = {"value": val, "unit": "words", "mode": "target"}
+        if val >= 250:
+            detail_level = "very_high"
+        elif val <= 100:
+            detail_level = "concise"
+
+    # Single-scene SAR Description check
+    is_sar_scene = (
+        (len(manifests) == 1 and manifests[0].modality == "sar")
+        or (any(w in q_lower for w in ["sar image", "sar observation", "radar image", "sar data"]) and not any(w in q_lower for w in ["optical", "rgb"]))
+    )
+
+    # 1. Multi-Intent: Location AND Change
+    if is_location_query and is_change_query and len(manifests) >= 2:
+        intent = "multi_intent_location_and_change"
+        target_focus = "location_and_change"
+        required_models = ["changeformer"]
+        operations = ["read_geospatial_metadata", "calculate_spatial_overlap", "reverse_geocode", "spatial_alignment", "bitemporal_difference"]
+        output_type = "narrative"
+        requested_measurements = ["place", "city", "state", "country", "common_area_km2", "changed_area_km2", "change_pct"]
+        summary_goal = "Determine shared geographic location and quantify temporal surface differences."
+
+    # 2. Location Identification for Temporal / Multi-image Pair
+    elif is_location_query and len(manifests) >= 2:
+        intent = "common_location_identification"
+        target_focus = "common_location"
+        required_models = ["internvl3"] if any(w in q_lower for w in ["detail", "describe", "combine", "summary"]) else []
+        operations = ["read_geospatial_metadata", "calculate_spatial_overlap", "identify_common_footprint", "reverse_geocode"]
+        output_type = "narrative"
+        requested_measurements = ["place", "city", "state", "country", "common_area_km2", "overlap_pct", "coordinates"]
+        summary_goal = "Determine shared geographic place, city, state, and country from paired spatial footprints and reverse geocoding."
+
+    # 3. Location Identification for Single Image
+    elif is_location_query:
+        intent = "location_identification"
+        target_focus = "location"
+        required_models = ["internvl3"] if any(w in q_lower for w in ["detail", "describe", "summary"]) else []
+        operations = ["read_geospatial_metadata", "wgs84_reprojection", "reverse_geocode"]
+        output_type = "narrative"
+        requested_measurements = ["place", "city", "state", "country", "coordinates"]
+        summary_goal = "Determine geographic place, city, state, and country from georeferenced raster metadata."
+
+    # 4. Pure Raster Metadata Query (No vision models needed)
+    elif any(k in q_lower for k in [
         "area of the raster", "area of the image", "area of the uploaded", "what is the area",
         "footprint of", "what is the crs", "coordinate system", "pixel resolution", "ground sampling distance",
         "raster bounds", "spatial extent of"
@@ -192,7 +271,7 @@ def parse_user_intent(
         requested_measurements = ["footprint_km2", "resolution_m", "crs"]
         summary_goal = "Directly report verified GeoTIFF metadata, physical footprint area, and coordinate system."
 
-    # 2. Spectral Indices Intent (Deterministic, no GPU model needed)
+    # 5. Spectral Indices Intent (Deterministic, no GPU model needed)
     elif any(k in q_lower for k in ["ndvi", "vegetation index", "ndwi", "water index", "greenness", "spectral"]):
         intent = "spectral_index"
         target_focus = "vegetation" if "ndvi" in q_lower or "greenness" in q_lower else "water"
@@ -202,10 +281,10 @@ def parse_user_intent(
         requested_measurements = ["ndvi"]
         summary_goal = "Deterministic spectral index computation with histogram distribution and threshold exceedance."
 
-    # 3. Temporal Comparison Queries
-    elif (is_temporal or any(k in q_lower for k in ["compare", "change", "difference", "between the two", "two images", "earlier", "later"])) and len(manifests) >= 2:
+    # 6. Temporal Comparison Queries (ONLY when query specifically asks about change or comparison)
+    elif len(manifests) >= 2 and (is_change_query or any(k in q_lower for k in ["compare", "difference", "earlier", "later", "what changed"])):
         is_temporal = True
-        # 3a. Temporal Building Change / Construction
+        # 6a. Temporal Building Change / Construction
         if any(b in q_lower for b in ["building", "structure", "house", "construction", "built-up", "urban development", "expansion"]):
             intent = "temporal_building_change"
             target_focus = "buildings"
@@ -215,7 +294,7 @@ def parse_user_intent(
             requested_measurements = ["new_building_count", "unchanged_building_count", "disappeared_building_count"]
             summary_goal = "Compare aligned temporal observations, match spatial building objects, and report newly appeared vs unchanged structures."
 
-        # 3b. Temporal Vegetation Loss / Deforestation
+        # 6b. Temporal Vegetation Loss / Deforestation
         elif any(v in q_lower for v in ["vegetation", "forest", "tree", "greenery", "deforestation", "canopy"]):
             intent = "temporal_vegetation_loss"
             target_focus = "vegetation"
@@ -225,7 +304,7 @@ def parse_user_intent(
             requested_measurements = ["lost_vegetation_area_km2", "loss_pct_of_baseline"]
             summary_goal = "Calculate comparative vegetation loss and area change between spatially aligned temporal observations."
 
-        # 3c. General Temporal Change Detection
+        # 6c. General Temporal Change Detection
         else:
             intent = "change_detection"
             target_focus = "general_change"
@@ -287,6 +366,16 @@ def parse_user_intent(
         requested_measurements = ["class_distribution"]
         summary_goal = "Segment and quantify surface land cover categories."
 
+    # 6d. Single-scene SAR Description (CROMA-Base or deterministic SAR backscatter)
+    elif is_sar_scene and not is_optical_sar:
+        intent = "sar_scene_description"
+        target_focus = "sar"
+        required_models = ["croma"]
+        operations = ["sar_radiometry_extraction", "specular_backscatter_analysis", "polarization_decomposition"]
+        output_type = "narrative"
+        requested_measurements = ["backscatter_mean", "polarization"]
+        summary_goal = "Provide expert Synthetic Aperture Radar (SAR) backscatter interpretation answering the specific inquiry."
+
     # 7. Scene Description / General VQA Intent
     else:
         intent = "scene_description"
@@ -305,6 +394,8 @@ def parse_user_intent(
         operations=operations,
         required_models=required_models,
         output_requirements=requested_measurements + [output_type],
+        requested_length=requested_length,
+        detail_level=detail_level,
         summary_goal=summary_goal
     )
 
@@ -314,6 +405,8 @@ def parse_user_intent(
         scene_ids=scene_ids,
         requested_output=output_type,
         requested_measurements=requested_measurements,
+        requested_length=requested_length,
+        detail_level=detail_level,
         diagnostic_model_override=diagnostic_override,
         analysis_plan=plan
     )
@@ -355,7 +448,40 @@ def decide_route(
                 decision_reason=f"Diagnostic model override requested: {override}"
             )
 
-    # 1. Deterministic Raster Metadata Route (Zero models needed)
+    # 1. Geographic Location Identification (Single or Paired Images)
+    if intent in ("location_identification", "common_location_identification"):
+        needs_vision = any(w in task_req.user_question.lower() for w in ["detail", "describe", "combine", "summary"])
+        return RouteDecision(
+            task=intent,
+            selected_adapter_or_none="internvl3" if needs_vision else None,
+            preprocessing_profile="geospatial_location_resolution",
+            validation_checks={"location_intent_verified": True},
+            blocked_reasons=[],
+            fallback_measurements=["place", "city", "state", "country", "common_area_km2"],
+            capabilities_version="2.0.0",
+            model_version="geo_lookup_v1",
+            estimated_resources={"vram_mb": 2048 if needs_vision else 0, "cpu_only": not needs_vision},
+            automatic_route=True,
+            decision_reason="Evidence-based geographic location identification and spatial footprint intersection."
+        )
+
+    # 2. Multi-Intent: Location AND Change Detection
+    if intent == "multi_intent_location_and_change":
+        return RouteDecision(
+            task="multi_intent_location_and_change",
+            selected_adapter_or_none="changeformer",
+            preprocessing_profile="bitemporal_location_and_change",
+            validation_checks={"location_intent_verified": True, "pair_validated": True},
+            blocked_reasons=[],
+            fallback_measurements=["place", "city", "state", "country", "changed_area_km2", "change_pct"],
+            capabilities_version="2.0.0",
+            model_version="geo_lookup_plus_changeformer_v1",
+            estimated_resources={"vram_mb": 2048},
+            automatic_route=True,
+            decision_reason="Dual-objective pipeline: Geographic location resolution followed by bitemporal change quantification."
+        )
+
+    # 3. Deterministic Raster Metadata Route (Zero models needed)
     if intent == "raster_metadata":
         return RouteDecision(
             task="raster_metadata",
@@ -514,6 +640,23 @@ def decide_route(
                 automatic_route=True,
                 decision_reason="UPerNet ConvNeXt semantic segmentation for land-cover classification."
             )
+
+    # 6b. Single-scene SAR Description Route (CROMA-Base)
+    if intent == "sar_scene_description":
+        croma_desc = REGISTRY.get("croma")
+        return RouteDecision(
+            task="sar_scene_description",
+            selected_adapter_or_none="croma" if (croma_desc and croma_desc.status == ModelStatus.VERIFIED) else None,
+            preprocessing_profile="sar_radiometric_analysis",
+            validation_checks={"sar_scene_verified": True},
+            blocked_reasons=[],
+            fallback_measurements=["backscatter_summary", "sar_polarization"],
+            capabilities_version="2.0.0",
+            model_version="CROMA-Base" if (croma_desc and croma_desc.status == ModelStatus.VERIFIED) else "deterministic_sar_v1",
+            estimated_resources={"vram_mb": 2560 if (croma_desc and croma_desc.status == ModelStatus.VERIFIED) else 0},
+            automatic_route=True,
+            decision_reason="Synthetic Aperture Radar (SAR) backscatter analysis and radiometry interpretation via CROMA."
+        )
 
     # 7. Default: Optical Scene Description & VQA (InternVL3-2B)
     ivl_desc = REGISTRY.get("internvl3")

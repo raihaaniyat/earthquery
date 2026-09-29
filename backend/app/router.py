@@ -180,9 +180,13 @@ def node_raster_measurements(state: RouterState) -> Dict[str, Any]:
     facts = {}
     measurements = []
     pair_metrics = None
+    location_info = None
 
     if file_paths:
         facts = extract_geotiff_facts(file_paths[0])
+        if task in ("location_identification", "common_location_identification", "multi_intent_location_and_change") or any(w in state.get("prompt", "").lower() for w in ["place", "city", "country", "state", "where", "location"]):
+            from backend.app.services.geo_lookup import identify_location_for_scenes
+            location_info = identify_location_for_scenes(file_paths)
 
     veg_delta = None
     if task == "spectral_index" and file_paths:
@@ -210,7 +214,8 @@ def node_raster_measurements(state: RouterState) -> Dict[str, Any]:
             "facts": facts,
             "spectral": measurements,
             "temporal": pair_metrics,
-            "vegetation_delta": veg_delta
+            "vegetation_delta": veg_delta,
+            "location": location_info
         },
         "evidence_bundle": bundle.model_dump()
     }
@@ -266,6 +271,24 @@ def node_dispatch_or_execute(state: RouterState) -> Dict[str, Any]:
                 f"Comparative vegetation analysis between the earlier and later satellite observations reveals a {loss_pct}% loss "
                 f"of baseline vegetation{area_str}. The primary concentration of vegetation clearance occurred in the {veg.get('primary_loss_sector', 'central')} sector."
             )
+        elif task in ("location_identification", "common_location_identification"):
+            from backend.app.services.geo_lookup import identify_location_for_scenes
+            from backend.app.services.response_composer import compose_conversational_response
+            loc = meas_info.get("location") or identify_location_for_scenes(files)
+            facts = meas_info.get("facts", {})
+            findings_data = {
+                "query": state.get("prompt", ""),
+                "location": loc,
+                "common_area_km2": loc.get("common_area_km2") or facts.get("footprint_km2"),
+                "crs": loc.get("crs") or facts.get("crs"),
+                "resolution_m": loc.get("resolution_m") or facts.get("resolution_m")
+            }
+            comp = compose_conversational_response(
+                query=state.get("prompt", ""),
+                intent=task,
+                findings_data=findings_data
+            )
+            narrative = comp["answer"]
         elif task == "change_difference_raster":
             tmp = meas_info.get("temporal", {})
             narrative = f"Bitemporal difference detected: {tmp.get('change_pct', 0)}% changed pixels ({tmp.get('changed_area_km2', 'N/A')} km²)."
@@ -720,6 +743,43 @@ def node_clarification(state: RouterState) -> Dict[str, Any]:
     return {"result": res, "pending_task": pending}
 
 
+def node_conversational_followup(state: RouterState) -> Dict[str, Any]:
+    """
+    Conversational Follow-Up Node: Composes a query-focused, evidence-grounded
+    natural-language answer to follow-up questions using existing findings without
+    re-running redundant GPU vision models.
+    """
+    conv_id = state.get("conversation_id")
+    prompt = state.get("prompt", "")
+    db = _get_active_db()
+    try:
+        conv = db.query(Conversation).filter(Conversation.id == conv_id).first() if conv_id else None
+        if not conv:
+            res = {
+                "status": "EXECUTED_ISOLATED",
+                "summary": "No active conversation available for conversational follow-up.",
+                "supporting_findings": [],
+                "findings": [],
+                "validation": "skipped",
+                "model": "SatQuery Conversational AI"
+            }
+        else:
+            followup_res = ConversationEngine.execute_conversational_followup(db, conv, prompt)
+            res = {
+                "status": "EXECUTED_ISOLATED",
+                "summary": followup_res["summary"],
+                "supporting_findings": followup_res.get("supporting_findings", []),
+                "findings": followup_res.get("findings", []),
+                "sections": followup_res.get("sections", {}),
+                "validation": followup_res.get("validation", "passed"),
+                "result_id": followup_res.get("result_id"),
+                "model": followup_res.get("model", "SatQuery Conversational AI")
+            }
+        return {"result": res, "summary": res["summary"]}
+    finally:
+        db.close()
+
+
 def route_turn_path(state: RouterState) -> str:
     """Conditional router function directing the turn to the appropriate branch."""
     action = state.get("turn_action_type", "new_analysis")
@@ -729,6 +789,8 @@ def route_turn_path(state: RouterState) -> str:
         return "map_action"
     elif action == "explanation":
         return "explanation"
+    elif action == "conversational_followup":
+        return "conversational_followup"
     elif action == "parameter_modification":
         return "parameter_modification"
     elif action == "spatial_proximity":
@@ -746,6 +808,7 @@ builder.add_node("classify_turn", node_classify_turn)
 builder.add_node("saved_fact", node_saved_fact)
 builder.add_node("map_action", node_map_action)
 builder.add_node("explanation", node_explanation)
+builder.add_node("conversational_followup", node_conversational_followup)
 builder.add_node("parameter_modification", node_parameter_modification)
 builder.add_node("spatial_proximity", node_spatial_proximity)
 builder.add_node("clarification", node_clarification)
@@ -766,6 +829,7 @@ builder.add_conditional_edges(
         "saved_fact": "saved_fact",
         "map_action": "map_action",
         "explanation": "explanation",
+        "conversational_followup": "conversational_followup",
         "parameter_modification": "parameter_modification",
         "spatial_proximity": "spatial_proximity",
         "clarification": "clarification",
@@ -777,6 +841,7 @@ builder.add_conditional_edges(
 builder.add_edge("saved_fact", END)
 builder.add_edge("map_action", END)
 builder.add_edge("explanation", END)
+builder.add_edge("conversational_followup", END)
 builder.add_edge("parameter_modification", END)
 builder.add_edge("spatial_proximity", END)
 builder.add_edge("clarification", END)

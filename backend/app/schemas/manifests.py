@@ -65,6 +65,8 @@ class AnalysisPlan(BaseModel):
     operations: List[str] = Field(default_factory=list)
     required_models: List[str] = Field(default_factory=list)  # 1-3 models max: e.g. ["owlv2"], ["upernet"], ["changeformer"]
     output_requirements: List[str] = Field(default_factory=list)
+    requested_length: Optional[Dict[str, Any]] = None  # e.g. {"value": 500, "unit": "words", "mode": "target"}
+    detail_level: str = "moderate"  # "concise", "moderate", "high", "very_high"
     summary_goal: str = ""
 
 
@@ -81,6 +83,8 @@ class TaskRequest(BaseModel):
     spatial_scope: Optional[Dict[str, Any]] = None  # AOI geometry
     model_capability_required: Optional[str] = None
     requested_measurements: List[str] = Field(default_factory=list)
+    requested_length: Optional[Dict[str, Any]] = None
+    detail_level: str = "moderate"
     diagnostic_model_override: Optional[str] = None  # Only for diagnostic testing
     analysis_plan: Optional[AnalysisPlan] = None
 
