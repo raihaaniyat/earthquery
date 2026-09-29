@@ -23,6 +23,8 @@ export interface DetectedObject {
 }
 
 export interface NormalizedAnalysis {
+  answer: string;
+  supportingFindings: string[];
   header: {
     title: string;
     status: string;
@@ -487,7 +489,32 @@ export function normalizeAnalysisResponse(
   if (hasOWLv2 && candidateTargetsCount > 0) supportingSources.push('OWLv2 GeoGround');
   if (rasterRawItems.length > 0 || crsStr) supportingSources.push('Deterministic Raster Analysis');
 
+  // 11. Conversational Answer & Supporting Findings
+  let conversationalAnswer = '';
+  if (directAnswerText) {
+    conversationalAnswer = directAnswerText;
+  } else if (summary && !summary.startsWith('## ')) {
+    conversationalAnswer = summary;
+  } else if (sceneSummary) {
+    conversationalAnswer = sceneSummary;
+  } else {
+    conversationalAnswer = summary;
+  }
+
+  const supportingFindingsList: string[] = [];
+  if (result.supporting_findings && result.supporting_findings.length > 0) {
+    supportingFindingsList.push(...result.supporting_findings);
+  } else {
+    for (const f of findings) {
+      if (f.label && f.detail) {
+        supportingFindingsList.push(`${f.label}: ${f.detail}`);
+      }
+    }
+  }
+
   return {
+    answer: conversationalAnswer,
+    supportingFindings: supportingFindingsList,
     header: {
       title: 'Satellite Scene Analysis',
       status: 'Analysis Complete',

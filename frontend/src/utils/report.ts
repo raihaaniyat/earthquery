@@ -57,7 +57,13 @@ export function markdownToHtml(md: string): string {
 }
 
 function formatInline(text: string): string {
-  let s = esc(text);
+  // Pre-clean raw markdown glitches like **\*\* or duplicated bullet points
+  let clean = (text || '')
+    .replace(/\*{3,}/g, '**')
+    .replace(/^[-*•\s]+/, '')
+    .trim();
+
+  let s = esc(clean);
   // Bold: **text**
   s = s.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
   // Italic: *text*

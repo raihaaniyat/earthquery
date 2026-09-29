@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { PlusIcon, XIcon, FileImageIcon } from 'lucide-react';
+import { PlusIcon, XIcon, FileImageIcon, Loader2Icon } from 'lucide-react';
 import { formatBytes } from '../utils/files';
 import type { AttachedImage } from '../types/app';
 
@@ -33,30 +33,42 @@ export function ImageDropZone({ label, hint, image, onFile, onClear }: ImageDrop
       
       {image ?
       <>
-          {image.previewable ?
-        <img className="drop-preview" src={image.url} alt={`${label} preview`} /> :
-
-        <div className="curtain-empty">
-              <FileImageIcon size={22} />
-              <span>Preview not supported in the browser — file kept for backend upload.</span>
+          {image.previewable ? (
+            <img className="drop-preview" src={image.url} alt={`${label} preview`} />
+          ) : image.previewStatus === 'loading' ? (
+            <div className="curtain-empty">
+              <Loader2Icon className="spin" size={24} style={{ color: 'var(--accent)' }} />
+              <span>Generating GeoTIFF visual preview...</span>
             </div>
-        }
-          <span className="drop-tag">{label}</span>
+          ) : (
+            <div className="curtain-empty">
+              <FileImageIcon size={22} style={{ opacity: 0.6 }} />
+              <span style={{ fontSize: '11px', maxWidth: '240px' }}>
+                {image.previewError || 'Preview unavailable — original raster kept for AI analysis.'}
+              </span>
+            </div>
+          )}
+          <span className="drop-tag">
+            {label}
+            {image.isGeoTiff ? ' · GeoTIFF' : ''}
+            {image.isSar ? ' · SAR' : ''}
+          </span>
           <div className="drop-caption">
-            <span>
-              {image.name} · {image.previewable ? `${image.width}×${image.height}` : formatBytes(image.size)}
+            <span title={`${image.name} (${formatBytes(image.size)})`}>
+              {image.name} · {image.previewable && image.width ? `${image.width}×${image.height}` : formatBytes(image.size)}
+              {image.crsName ? ` · ${image.crsName}` : ''}
             </span>
             <label className="btn small file-btn">
               Replace
               <input
-              type="file"
-              accept="image/png,image/jpeg,image/webp,.tif,.tiff"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) onFile(f);
-                e.target.value = '';
-              }} />
-            
+                type="file"
+                accept="image/png,image/jpeg,image/webp,.tif,.tiff"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) onFile(f);
+                  e.target.value = '';
+                }}
+              />
             </label>
             <button className="btn small" onClick={onClear} aria-label={`Remove ${label} image`}>
               <XIcon size={12} />

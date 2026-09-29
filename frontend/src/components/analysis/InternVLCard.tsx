@@ -6,18 +6,7 @@ export function InternVLCard({ internvl }: { internvl?: NormalizedAnalysis['mode
   const [expanded, setExpanded] = useState(false);
 
   if (!internvl || !internvl.available) {
-    return (
-      <div className="model-card panel" style={{ opacity: 0.65, padding: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <BrainIcon size={18} color="var(--faint, #746c78)" />
-          <b style={{ color: 'var(--text-soft)' }}>InternVL3-2B</b>
-          <span className="badge" style={{ fontSize: 10, marginLeft: 'auto' }}>Inactive</span>
-        </div>
-        <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--muted)' }}>
-          Model-specific visual reasoning was not invoked for this task pipeline.
-        </p>
-      </div>
-    );
+    return null;
   }
 
   const hasExtra =

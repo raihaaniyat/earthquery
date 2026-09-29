@@ -17,18 +17,7 @@ export function UPerNetCard({ upernet }: { upernet?: NormalizedAnalysis['models'
   const [zoomMask, setZoomMask] = useState(false);
 
   if (!upernet || !upernet.available) {
-    return (
-      <div className="model-card panel" style={{ opacity: 0.65, padding: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <LayersIcon size={18} color="var(--faint, #746c78)" />
-          <b style={{ color: 'var(--text-soft)' }}>UPerNet ConvNeXt</b>
-          <span className="badge" style={{ fontSize: 10, marginLeft: 'auto' }}>Inactive</span>
-        </div>
-        <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--muted)' }}>
-          Surface segmentation was not executed for this image mode.
-        </p>
-      </div>
-    );
+    return null;
   }
 
   const classes = upernet.classes || [];

@@ -4,18 +4,7 @@ import type { NormalizedAnalysis } from '../../utils/normalizeAnalysis';
 
 export function OWLv2Card({ owlv2 }: { owlv2?: NormalizedAnalysis['models']['owlv2'] }) {
   if (!owlv2 || !owlv2.available) {
-    return (
-      <div className="model-card panel" style={{ opacity: 0.65, padding: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <TargetIcon size={18} color="var(--faint, #746c78)" />
-          <b style={{ color: 'var(--text-soft)' }}>OWLv2 GeoGround</b>
-          <span className="badge" style={{ fontSize: 10, marginLeft: 'auto' }}>Inactive</span>
-        </div>
-        <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--muted)' }}>
-          Open-vocabulary visual grounding was not engaged for this query pipeline.
-        </p>
-      </div>
-    );
+    return null;
   }
 
   const objects = owlv2.detectedObjects || [];
