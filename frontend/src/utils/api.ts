@@ -123,6 +123,7 @@ export const TASK_MAP: Record<string, string> = {
   'fire': 'internvl',
   'water': 'internvl',
   'general': 'internvl',
+  'optical-sar': 'optical_sar_fusion',
 };
 
 const E = API_CONFIG.endpoints;
@@ -147,15 +148,26 @@ export async function fetchCapabilities(): Promise<ApiResult<Record<string, unkn
  * Transforms the frontend AnalysisRequest into the backend's dispatch contract.
  */
 async function submitAnalysis(p: AnalysisRequest, files: File[]): Promise<ApiResult<AnalysisResponse>> {
+  const isOpticalSar =
+    p.task === 'optical-sar' ||
+    (p.task as string) === 'optical_sar_fusion' ||
+    p.comparisonMode === 'optical-sar' ||
+    p.model === 'CROMA' ||
+    p.model === 'OpticalSAR' ||
+    /(optical.*sar|sar.*optical|\bfusion\b|\bcroma\b)/i.test(p.query || '');
+  const pairType = isOpticalSar
+    ? 'optical_sar'
+    : (files.length >= 2 ? 'bitemporal' : 'single_image');
+
   // If files are attached, use the v1 structured scene upload + job submission flow
   if (files.length > 0) {
     // Upload files first, then dispatch
     const fd = new FormData();
     fd.append('payload', JSON.stringify({
-      task: TASK_MAP[p.task] || 'internvl',
+      task: isOpticalSar ? 'optical_sar_fusion' : (TASK_MAP[p.task] || 'internvl'),
       input_category: 'benchmark',
-      pair_type: files.length >= 2 ? 'bitemporal' : 'single_image',
-      prompt: p.query || 'Analyze this satellite imagery.',
+      pair_type: pairType,
+      prompt: p.query || (isOpticalSar ? 'Perform optical-sar fusion analysis.' : 'Analyze this satellite imagery.'),
       model: MODEL_MAP[p.model] || '',
     }));
     files.forEach((f) => fd.append('images', f, f.name));
@@ -164,10 +176,10 @@ async function submitAnalysis(p: AnalysisRequest, files: File[]): Promise<ApiRes
 
   // No files — dispatch with AOI/query only
   const body: Record<string, unknown> = {
-    task: TASK_MAP[p.task] || 'internvl',
+    task: isOpticalSar ? 'optical_sar_fusion' : (TASK_MAP[p.task] || 'internvl'),
     input_category: 'benchmark',
-    pair_type: 'single_image',
-    prompt: p.query || 'Analyze this satellite imagery.',
+    pair_type: isOpticalSar ? 'optical_sar' : 'single_image',
+    prompt: p.query || (isOpticalSar ? 'Perform optical-sar fusion analysis.' : 'Analyze this satellite imagery.'),
     model: MODEL_MAP[p.model] || '',
   };
   if (p.aoi) {

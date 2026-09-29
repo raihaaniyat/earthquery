@@ -16,6 +16,7 @@ import {
   MessageSquareIcon,
   ExternalLinkIcon,
   AlertCircleIcon,
+  LayersIcon,
   type LucideIcon
 } from "lucide-react";
 import { useApp } from "../contexts/AppContext";
@@ -35,7 +36,8 @@ const TASK_ICON: Record<TaskType, LucideIcon> = {
   spectral: ApertureIcon,
   fire: FlameIcon,
   water: WavesIcon,
-  general: SparklesIcon
+  general: SparklesIcon,
+  'optical-sar': LayersIcon
 };
 
 export const STATUS_BADGE: Record<HistoryStatus, {

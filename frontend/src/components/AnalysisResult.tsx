@@ -58,12 +58,18 @@ export const AnalysisResult: React.FC<AnalysisResultProps> = ({
     limitations
   } = normalized;
 
-  // Active models only
+  // Active models
   const activeModels: string[] = [];
-  if (models.internvl?.available) activeModels.push('InternVL3-2B');
-  if (models.upernet?.available) activeModels.push('UPerNet-ConvNeXt');
-  if (models.owlv2?.available) activeModels.push('OWLv2 Grounding');
-  if (models.changeformer?.available) activeModels.push('ChangeFormerV6');
+  if (result.participating_models && result.participating_models.length > 0) {
+    activeModels.push(...result.participating_models);
+  } else if (metadata?.participatingModels && metadata.participatingModels.length > 0) {
+    activeModels.push(...metadata.participatingModels);
+  } else {
+    if (models.internvl?.available) activeModels.push('InternVL3-2B');
+    if (models.upernet?.available) activeModels.push('UPerNet-ConvNeXt');
+    if (models.owlv2?.available) activeModels.push('OWLv2 Grounding');
+    if (models.changeformer?.available) activeModels.push('ChangeFormerV6');
+  }
 
   // Ground resolution & footprint deduplication
   const groundRes = raster?.resolutionM || metadata?.groundResolution;

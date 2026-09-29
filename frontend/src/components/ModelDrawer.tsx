@@ -92,6 +92,7 @@ export function ModelDrawer() {
                 onChange={(e) => setDraft((d) => ({ ...d, comparisonMode: e.target.value as ModelSettings['comparisonMode'] }))}>
                 
                   <option value="before-after">Before / After</option>
+                  <option value="optical-sar">Optical-SAR Fusion</option>
                   <option value="single">Single image</option>
                   <option value="multi-date">Multi-date</option>
                 </select>

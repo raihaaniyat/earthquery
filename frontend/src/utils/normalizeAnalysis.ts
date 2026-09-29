@@ -213,21 +213,29 @@ export function normalizeAnalysisResponse(
   };
 
   // 2. Identify participating models
-  const participatingModels: string[] = [];
   const modelLower = (modelStr + ' ' + metadataText + ' ' + summary).toLowerCase();
   const hasInternVL = modelLower.includes('internvl');
   const hasUPerNet = modelLower.includes('upernet');
   const hasOWLv2 = modelLower.includes('owlv2') || modelLower.includes('geoground');
   const hasChangeFormer = modelLower.includes('changeformer');
   const hasCROMA = modelLower.includes('croma');
+  const hasOpticalSAR = modelLower.includes('optical-sar') || modelLower.includes('optical_sar');
+  const hasChangeVQA = modelLower.includes('change_vqa') || modelLower.includes('change vqa');
 
-  if (hasInternVL) participatingModels.push('InternVL3-2B');
-  if (hasUPerNet) participatingModels.push('UPerNet ConvNeXt');
-  if (hasOWLv2) participatingModels.push('OWLv2 GeoGround');
-  if (hasChangeFormer) participatingModels.push('ChangeFormerV6');
-  if (hasCROMA) participatingModels.push('CROMA-Base');
-  if (!participatingModels.length && modelStr) {
-    participatingModels.push(modelStr);
+  const participatingModels: string[] = [];
+  if (result.participating_models && result.participating_models.length > 0) {
+    participatingModels.push(...result.participating_models);
+  } else {
+    if (hasInternVL) participatingModels.push('InternVL3-2B');
+    if (hasUPerNet) participatingModels.push('UPerNet ConvNeXt');
+    if (hasOWLv2) participatingModels.push('OWLv2 GeoGround');
+    if (hasChangeFormer) participatingModels.push('ChangeFormerV6');
+    if (hasCROMA) participatingModels.push('CROMA-Base');
+    if (hasOpticalSAR) participatingModels.push('Optical-SAR Classification Head');
+    if (hasChangeVQA) participatingModels.push('Paired Change VQA');
+    if (!participatingModels.length && modelStr) {
+      participatingModels.push(modelStr);
+    }
   }
 
   // 3. InternVL3-2B Specific Parsing

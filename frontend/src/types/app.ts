@@ -27,7 +27,7 @@ export interface ModelSettings {
   model: ModelId;
   routing: 'auto' | 'manual';
   validation: boolean;
-  comparisonMode: 'before-after' | 'single' | 'multi-date';
+  comparisonMode: 'before-after' | 'single' | 'optical-sar' | 'multi-date';
   output: 'visual' | 'mask' | 'data';
 }
 
@@ -40,7 +40,8 @@ export type TaskType =
 'spectral' |
 'fire' |
 'water' |
-'general';
+'general' |
+'optical-sar';
 
 export type AdvancedToolId = 'temporal' | 'spectral' | 'change' | 'measure' | 'fire' | 'water';
 
@@ -143,6 +144,7 @@ export interface AnalysisResponse {
   findings?: AnalysisFinding[];
   maskUrl?: string;
   model?: string;
+  participating_models?: string[];
   validation?: 'passed' | 'failed' | 'skipped' | string;
   metrics?: Record<string, string | number>;
   sections?: ScientificSections;

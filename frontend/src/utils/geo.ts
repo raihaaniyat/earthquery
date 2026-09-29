@@ -120,6 +120,7 @@ export function validateDateRange(start: string, end: string): string | null {
 
 export function inferTask(query: string, imageCount: number): TaskType {
   const q = query.toLowerCase();
+  if (/(optical.*sar|sar.*optical|\bfusion\b|\bcroma\b|\bsar\b|\bradar\b)/.test(q)) return 'optical-sar';
   if (/(over time|temporal|trend|season|time series|timeline)/.test(q)) return 'temporal';
   if (/(chang|before|after|differ|compare)/.test(q)) return 'change-detection';
   if (/(what is|image type|what does it have|what.*contain|describe|explain|tell me about|analyze scene)/.test(q)) return 'scene-description';
@@ -142,5 +143,6 @@ export const TASK_LABELS: Record<TaskType, string> = {
   spectral: 'Spectral analysis',
   fire: 'Fire / hotspots',
   water: 'Water / ocean',
-  general: 'General analysis'
+  general: 'General analysis',
+  'optical-sar': 'Optical-SAR fusion analysis'
 };

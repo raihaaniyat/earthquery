@@ -67,29 +67,59 @@ export function Imagery() {
 
   const runBackend = async (kind: 'describe' | 'buildings' | 'analyze') => {
     if (!images.length) return setBackend({ status: 'invalid', message: 'Upload at least one image first.' });
+    const inferred = inferTask(query, images.length);
+    const isOpticalSarMode =
+      modelSettings.comparisonMode === 'optical-sar' ||
+      inferred === 'optical-sar' ||
+      modelSettings.model === 'CROMA' ||
+      modelSettings.model === 'OpticalSAR';
+
     let task: TaskType =
-    kind === 'describe' ? 'scene-description' : kind === 'buildings' ? 'object-detection' : modelSettings.comparisonMode === 'single' ? inferTask(query, 1) : 'change-detection';
+      kind === 'describe'
+        ? 'scene-description'
+        : kind === 'buildings'
+        ? 'object-detection'
+        : isOpticalSarMode
+        ? 'optical-sar'
+        : modelSettings.comparisonMode === 'single'
+        ? inferTask(query, 1)
+        : inferred;
     if (task === 'change-detection' && images.length < 2) {
       return setBackend({ status: 'invalid', message: 'Before/after comparison needs both images. Switch Comparison to “Single image” to analyze one.' });
+    }
+    if (task === 'optical-sar' && images.length < 2) {
+      return setBackend({ status: 'invalid', message: 'Optical-SAR fusion requires both an Optical and a SAR image.' });
     }
     if (kind === 'analyze' && task === 'general') task = 'scene-description';
     setBackend({ status: 'loading', message: `Running ${TASK_LABELS[task].toLowerCase()}…` });
     const req = buildRequest(task, query || TASK_LABELS[task], { aoi: null });
     const files = images.map((i) => i.file);
     const res =
-    task === 'change-detection' ?
-    await api.changeDetection(req, files) :
-    task === 'object-detection' || task === 'segmentation' ?
-    await api.prediction(req, files) :
-    await api.analysis(req, files);
+      task === 'optical-sar' ?
+      await api.analysis(req, files) :
+      task === 'change-detection' ?
+      await api.changeDetection(req, files) :
+      task === 'object-detection' || task === 'segmentation' ?
+      await api.prediction(req, files) :
+      await api.analysis(req, files);
     setBackend(res);
     logResult(task, query, images.map((i) => i.name), res);
   };
 
+  const identifiedTask =
+    modelSettings.comparisonMode === 'optical-sar' ||
+    inferTask(query, images.length) === 'optical-sar' ||
+    modelSettings.model === 'CROMA' ||
+    modelSettings.model === 'OpticalSAR'
+      ? 'optical-sar'
+      : modelSettings.comparisonMode === 'single'
+      ? inferTask(query, 1)
+      : inferTask(query, images.length);
+
   const trace: {label: string;state: 'ok' | 'pending' | 'loading' | 'bad';note: string;}[] = [
   { label: 'Input received', state: images.length ? 'ok' : 'pending', note: `${images.length}/2 images` },
   { label: 'Query understood', state: query.trim() ? 'ok' : 'pending', note: query.trim() ? 'Yes' : 'Empty' },
-  { label: 'Task identified', state: query.trim() ? 'ok' : 'pending', note: TASK_LABELS[inferTask(query, images.length)] },
+  { label: 'Task identified', state: query.trim() || modelSettings.comparisonMode === 'optical-sar' ? 'ok' : 'pending', note: TASK_LABELS[identifiedTask] },
   { label: 'Model selected', state: 'ok', note: modelSettings.model },
   {
     label: 'Validation',
@@ -296,9 +326,23 @@ export function Imagery() {
           <div className="panel panel-pad">
             <div className="panel-title">Result preview</div>
             <canvas ref={canvasRef} className="change-canvas" style={{ display: diff.status === 'success' ? 'block' : 'none' }} aria-label="Change mask" />
+            {backend.status === 'success' && backend.data?.maskUrl && (
+              <div style={{ marginTop: diff.status === 'success' ? 12 : 0, marginBottom: 12 }}>
+                <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--accent)', marginBottom: 6 }}>
+                  Spatial Mask (Optical-SAR Consensus / Change Mask)
+                </div>
+                <div style={{ borderRadius: 6, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)', background: '#000', display: 'flex', justifyContent: 'center' }}>
+                  <img
+                    src={backend.data.maskUrl}
+                    alt="Spatial Mask Preview"
+                    style={{ maxWidth: '100%', maxHeight: '280px', objectFit: 'contain' }}
+                  />
+                </div>
+              </div>
+            )}
             <StateNotice
               state={diff}
-              idleText="No comparison run yet. Upload BEFORE and AFTER images, then run Detect changes for a browser-side pixel difference."
+              idleText={backend.status === 'success' && backend.data?.maskUrl ? undefined : "No comparison run yet. Upload BEFORE and AFTER images, then run Detect changes for a browser-side pixel difference, or click Analyze imagery."}
               successText={
               diff.status === 'success' ?
               `${diff.data.changedPct.toFixed(2)}% of pixels exceeded the difference threshold (${diff.data.threshold}). This is a visual comparison, not a trained change-detection model.` :
@@ -343,10 +387,11 @@ export function Imagery() {
               <label className="field-label" htmlFor="comparison">Comparison</label>
               <select
                 id="comparison"
-                value={modelSettings.comparisonMode === 'single' ? 'single' : 'before-after'}
+                value={modelSettings.comparisonMode}
                 onChange={(e) => updateModelSettings({ comparisonMode: e.target.value as ModelSettings['comparisonMode'] })}>
                 
                 <option value="before-after">Before / After</option>
+                <option value="optical-sar">Optical-SAR Fusion</option>
                 <option value="single">Single image</option>
               </select>
             </div>
