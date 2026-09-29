@@ -10,7 +10,7 @@ import platform
 import subprocess
 from pathlib import Path
 
-REPO_ROOT = Path("c:/Users/HP/earthquery")
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 def run_cmd(cmd_list, env=None):
     try:
@@ -46,12 +46,12 @@ def audit():
     report_lines.append(f"**Docker in PATH:** {'No' if not out_dock else out_dock}")
     
     report_lines.append("\n## 1. Existing Conda Environments")
-    sqConda = "C:/Users/HP/miniconda3/Scripts/conda.exe"
+    sqConda = shutil.which("conda") or ("C:/Users/HP/miniconda3/Scripts/conda.exe" if Path("C:/Users/HP/miniconda3/Scripts/conda.exe").exists() else "conda")
     ret, out, _ = run_cmd([sqConda, "env", "list"])
     report_lines.append("```text\n" + out + "\n```")
     
     report_lines.append("\n## 2. Geospatial Stack Audit (`satquery-core`)")
-    core_python = "C:/Users/HP/miniconda3/envs/satquery-core/python.exe"
+    core_python = "C:/Users/HP/miniconda3/envs/satquery-core/python.exe" if Path("C:/Users/HP/miniconda3/envs/satquery-core/python.exe").exists() else (shutil.which("python") or "python")
     geo_test_code = """
 import osgeo.gdal as gdal
 import rasterio
@@ -72,7 +72,7 @@ drv = gdal.GetDriverByName('GTiff')
 print(f"GTiff Driver available: {drv is not None}")
 
 # Native raster create, write, read, CRS transform test
-test_tif = 'c:/Users/HP/earthquery/artifacts/baseline/test_geo.tif'
+test_tif = str((REPO_ROOT / "artifacts/baseline/test_geo.tif").resolve()).replace('\\\\', '/')
 transform = rasterio.transform.from_origin(77.59, 12.97, 0.0001, 0.0001)
 data = np.random.randint(0, 255, (3, 64, 64), dtype=np.uint8)
 with rasterio.open(
@@ -123,7 +123,7 @@ if torch.cuda.is_available():
         report_lines.append(f"PyTorch test FAILED:\n```text\n{err}\n```")
         
     report_lines.append("\n## 4. Model Checkpoint & State Inventory")
-    models_dir = Path("c:/Users/HP/earthquery/models")
+    models_dir = REPO_ROOT / "models"
     models_info = []
     for item in models_dir.iterdir():
         if item.is_dir():

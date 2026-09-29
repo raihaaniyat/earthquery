@@ -3,7 +3,7 @@
 
 $ErrorActionPreference = "Stop"
 $sqRoot = Resolve-Path "$PSScriptRoot\.."
-$sqConda = "C:\Users\HP\miniconda3\Scripts\conda.exe"
+$sqConda = if (Test-Path "C:\Users\HP\miniconda3\Scripts\conda.exe") { "C:\Users\HP\miniconda3\Scripts\conda.exe" } elseif (Get-Command conda -ErrorAction SilentlyContinue) { (Get-Command conda).Source } else { "conda" }
 $pidFile = Join-Path $sqRoot ".pids.json"
 $logDir = Join-Path $sqRoot "artifacts\logs"
 
@@ -23,8 +23,8 @@ if (Test-Path $pidFile) {
 
 $pids = @{}
 
-$apiPython = "C:\Users\HP\miniconda3\envs\satquery-api\python.exe"
-$apiUvicorn = "C:\Users\HP\miniconda3\envs\satquery-api\Scripts\uvicorn.exe"
+$apiPython = if (Test-Path "C:\Users\HP\miniconda3\envs\satquery-api\python.exe") { "C:\Users\HP\miniconda3\envs\satquery-api\python.exe" } elseif ($env:CONDA_PREFIX) { Join-Path $env:CONDA_PREFIX "python.exe" } else { "python" }
+$apiUvicorn = if (Test-Path "C:\Users\HP\miniconda3\envs\satquery-api\Scripts\uvicorn.exe") { "C:\Users\HP\miniconda3\envs\satquery-api\Scripts\uvicorn.exe" } elseif ($env:CONDA_PREFIX) { Join-Path $env:CONDA_PREFIX "Scripts\uvicorn.exe" } else { "uvicorn" }
 
 # 1. Start FastAPI Application in satquery-api
 Write-Host "[1/3] Launching FastAPI REST API on http://127.0.0.1:8000..." -ForegroundColor Yellow

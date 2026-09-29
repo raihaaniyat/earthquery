@@ -3,9 +3,13 @@ Application Settings & Configuration via Pydantic Settings.
 Implements typed, validated environment settings adhering to the SatQuery Phase 2 specifications.
 """
 
+from pathlib import Path
+import shutil
 from typing import List, Optional
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
@@ -43,14 +47,21 @@ class Settings(BaseSettings):
     S3_BUCKET_NAME: str = "satquery-inputs"  # Compatibility
 
     # 4. Storage & Execution Paths
-    SATQUERY_DATA_ROOT: str = "C:/Users/HP/earthquery/data"
-    SATQUERY_CACHE_ROOT: str = "C:/Users/HP/earthquery/cache"
-    SATQUERY_MODEL_ROOT: str = "C:/Users/HP/earthquery/models"
-    SATQUERY_STORAGE_ROOT: str = "C:/Users/HP/earthquery/storage"
-    MODELS_DIR: str = "C:/Users/HP/earthquery/models"
+    SATQUERY_DATA_ROOT: str = str(PROJECT_ROOT / "data")
+    SATQUERY_CACHE_ROOT: str = str(PROJECT_ROOT / "cache")
+    SATQUERY_MODEL_ROOT: str = str(PROJECT_ROOT / "models")
+    SATQUERY_STORAGE_ROOT: str = str(PROJECT_ROOT / "storage")
+    MODELS_DIR: str = str(PROJECT_ROOT / "models")
 
     # 5. Conda Python Interpreters & Environments
-    SATQUERY_CONDA_EXE: str = "C:/Users/HP/miniconda3/Scripts/conda.exe"
+    SATQUERY_CONDA_EXE: str = (
+        shutil.which("conda")
+        or (
+            "C:/Users/HP/miniconda3/Scripts/conda.exe"
+            if Path("C:/Users/HP/miniconda3/Scripts/conda.exe").exists()
+            else "conda"
+        )
+    )
     CORE_ENV: str = "satquery-core"
     CHANGEFORMER_ENV: str = "satquery-changeformer"
     GEOGROUND_ENV: str = "satquery-geoground"
