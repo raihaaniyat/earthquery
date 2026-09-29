@@ -35,7 +35,7 @@ Three isolated Conda environments are configured to prevent dependency collision
 - **API & Routing:** FastAPI 0.141.1, Uvicorn 0.54.0, Pydantic-Settings 2.15.0, LangGraph 1.2.12, HTTPX
 - **Database & Queue:** SQLAlchemy 2.1.1, Alembic 1.20.0, Psycopg 3.3.6, GeoAlchemy2 0.20.0, Redis 8.1.0, RQ 2.12.0
 - **Testing & Reports:** ReportLab 5.0.1, Pytest 9.1.1
-- **Lockfiles:** [`requirements-core.txt`](file:///c:/Users/HP/earthquery/requirements-core.txt) and [`environment-satquery-core.yml`](file:///c:/Users/HP/earthquery/environment-satquery-core.yml)
+- **Lockfiles:** [`requirements-core.txt`](requirements-core.txt) and [`environment-satquery-core.yml`](environment-satquery-core.yml)
 
 ### 2. `satquery-changeformer` (Isolated ChangeFormer Environment)
 - **Python:** 3.9.25
@@ -50,7 +50,7 @@ Three isolated Conda environments are configured to prevent dependency collision
 
 ## 3. Model Components & Verification Results
 
-All checkpoints are located in the git-ignored [`models/`](file:///c:/Users/HP/earthquery/models) directory:
+All checkpoints are located in the git-ignored [`models/`](models) directory:
 
 ### A. InternVL3-2B
 - **Source:** [`OpenGVLab/InternVL3-2B`](https://huggingface.co/OpenGVLab/InternVL3-2B)
@@ -94,11 +94,13 @@ All checkpoints are located in the git-ignored [`models/`](file:///c:/Users/HP/e
 
 ### F. Paired-Image Change VQA
 - **Status:** **TRAINING REQUIRED**
-- **Registry Entry:** Registered in [`backend/app/models_registry.py`](file:///c:/Users/HP/earthquery/backend/app/models_registry.py). Requires fine-tuning on CDVQA dataset. No SatQuery-specific weights exist yet.
+- **Registry Entry:** Registered in [`backend/app/models_registry.py`](backend/app/models_registry.py). Requires fine-tuning on CDVQA dataset. No SatQuery-specific weights exist yet.
 
 ### G. Optical–SAR Prediction Head
-- **Status:** **TRAINING REQUIRED**
-- **Registry Entry:** Registered in [`backend/app/models_registry.py`](file:///c:/Users/HP/earthquery/backend/app/models_registry.py). Requires multimodal contrastive projection training on BigEarthNet-MM. No SatQuery-specific weights exist yet.
+- **Status:** **VERIFIED**
+- **Checkpoint Path:** `models/CROMA/optical_sar_head_best.pt` (5.2 MB)
+- **Inference Verification:** Multimodal classification verified on CROMA joint GAP embeddings across paired optical and SAR inputs.
+- **Registry Entry:** Registered in [`backend/app/models_registry.py`](backend/app/models_registry.py). Trained on CROMA multimodal contrastive representations.
 
 ---
 
@@ -112,7 +114,7 @@ All checkpoints are located in the git-ignored [`models/`](file:///c:/Users/HP/e
 | **UPerNet ConvNeXt** | Land Cover Segmentation Demo | **VERIFIED** | Verified smoke test. Demo ADE20k classes. Satellite head training required. |
 | **GeoGround 7B** | RS Visual Grounding (HBB/OBB) | **INSTALLED BUT NOT RUNNABLE LOCALLY** | 13.16 GB weights exceed 8 GB VRAM. Needs more memory or offload. |
 | **Paired Change VQA** | Bitemporal Natural Language QA | **TRAINING REQUIRED** | Registered capability; training required on CDVQA benchmark. |
-| **Optical-SAR Head** | Cross-sensor Translation/Alignment | **TRAINING REQUIRED** | Registered capability; training required on BigEarthNet-MM. |
+| **Optical-SAR Head** | Cross-sensor Translation/Alignment | **VERIFIED** | Trained on CROMA embeddings with multimodal classification verification. |
 
 > [!WARNING]
 > **Operational Boundary Notice:** Baseline single-image inference and synthetic tensor passes verify runtime stability, driver compatibility, and memory bounds. They do NOT constitute proof that SatQuery AI has solved general remote-sensing tasks without task-specific domain adaptation.
@@ -121,7 +123,7 @@ All checkpoints are located in the git-ignored [`models/`](file:///c:/Users/HP/e
 
 ## 5. Input Pipeline Rules & Validation
 
-Implemented in [`backend/app/input_validator.py`](file:///c:/Users/HP/earthquery/backend/app/input_validator.py):
+Implemented in [`backend/app/input_validator.py`](backend/app/input_validator.py):
 1. **GeoTIFF / TIFF Path:**
    - Evaluates CRS, Affine transform, bounding box, band count, data types, and no-data values via Rasterio.
    - Rejects unprojected rasters when geospatial projection is required.

@@ -56,8 +56,6 @@ EarthQuery integrates the following capabilities through task-specific workers a
 
 Upload a georeferenced TIFF to locate the imagery on the map at its recorded geographic position. This connects the uploaded scene with its real-world location and makes spatial context available before analysis.
 
-**Availability:** Implemented in the local build; the feature is not yet committed to the public repository.
-
 Placement uses the raster’s georeferencing. Its positional accuracy follows the source data; a TIFF without usable geographic metadata needs that information before automatic map localisation is possible.
 
 ![Uploaded GeoTIFF located on the EarthQuery map](assets/geotiff-map-localisation.png)
@@ -392,4 +390,4 @@ EarthQuery builds on the work of the InternVL, CROMA, UPerNet, ChangeFormer and 
 
 ## Licensing
 
-Project licensing is to be specified by the maintainers. Model weights, datasets and third-party dependencies remain subject to their own licences and terms. Inclusion in the architecture does not grant redistribution or commercial-use rights.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details. Model weights, datasets and third-party dependencies remain subject to their own licences and terms. Inclusion in the architecture does not grant redistribution or commercial-use rights.
