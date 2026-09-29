@@ -41,20 +41,39 @@ def load_sar_tensor(path: str, device: str) -> torch.Tensor:
     """Loads SAR imagery (2 bands: VV, VH) and formats to (1, 2, 120, 120)."""
     if path and os.path.exists(path):
         if path.endswith(".npy"):
-            arr = np.load(path)
+            arr = np.load(path).astype(np.float32)
             t = torch.from_numpy(arr).float()
             if t.ndim == 3:
                 t = t.unsqueeze(0)
-            if t.shape[1] != 2:
-                # Adjust channel count if necessary
-                t = t[:, :2, :, :] if t.shape[1] > 2 else t.repeat(1, 2, 1, 1)
+            if t.shape[1] == 1:
+                t = t.repeat(1, 2, 1, 1)
+            elif t.shape[1] > 2:
+                t = t[:, :2, :, :]
             return torch.nn.functional.interpolate(t, size=(120, 120), mode="bilinear").to(device)
-        else:
-            # Image format (e.g. PNG / TIF)
+
+        if path.lower().endswith((".tif", ".tiff")):
+            try:
+                import rasterio
+                with rasterio.open(path) as src:
+                    arr = src.read().astype(np.float32)  # (C, H, W)
+                    p99 = np.percentile(arr, 99) if arr.size > 0 else 1.0
+                    arr = np.clip(arr / max(p99, 1e-4), 0.0, 1.0)
+                    t = torch.from_numpy(arr).unsqueeze(0)
+                    if t.shape[1] == 1:
+                        t = t.repeat(1, 2, 1, 1)
+                    elif t.shape[1] > 2:
+                        t = t[:, :2, :, :]
+                    return torch.nn.functional.interpolate(t, size=(120, 120), mode="bilinear").to(device)
+            except Exception:
+                pass
+
+        try:
             img = Image.open(path).convert("L").resize((120, 120))
             arr = np.array(img, dtype=np.float32) / 255.0
             t = torch.from_numpy(arr).unsqueeze(0).unsqueeze(0).repeat(1, 2, 1, 1)
             return t.to(device)
+        except Exception:
+            pass
 
     # Standard fallback test tensor
     return torch.rand(1, 2, 120, 120, device=device).float()
@@ -64,20 +83,42 @@ def load_optical_tensor(path: str, device: str) -> torch.Tensor:
     """Loads Optical imagery (12 bands) and formats to (1, 12, 120, 120)."""
     if path and os.path.exists(path):
         if path.endswith(".npy"):
-            arr = np.load(path)
+            arr = np.load(path).astype(np.float32)
             t = torch.from_numpy(arr).float()
             if t.ndim == 3:
                 t = t.unsqueeze(0)
-            if t.shape[1] != 12:
-                # If RGB (3 channels), replicate to 12 channels
-                t = t.repeat(1, 4, 1, 1)[:, :12, :, :]
+            if t.shape[1] < 12:
+                reps = int(np.ceil(12 / t.shape[1]))
+                t = t.repeat(1, reps, 1, 1)[:, :12, :, :]
+            elif t.shape[1] > 12:
+                t = t[:, :12, :, :]
             return torch.nn.functional.interpolate(t, size=(120, 120), mode="bilinear").to(device)
-        else:
+
+        if path.lower().endswith((".tif", ".tiff")):
+            try:
+                import rasterio
+                with rasterio.open(path) as src:
+                    arr = src.read().astype(np.float32)  # (C, H, W)
+                    p99 = np.percentile(arr, 99) if arr.size > 0 else 1.0
+                    arr = np.clip(arr / max(p99, 1e-4), 0.0, 1.0)
+                    t = torch.from_numpy(arr).unsqueeze(0)
+                    if t.shape[1] < 12:
+                        reps = int(np.ceil(12 / t.shape[1]))
+                        t = t.repeat(1, reps, 1, 1)[:, :12, :, :]
+                    elif t.shape[1] > 12:
+                        t = t[:, :12, :, :]
+                    return torch.nn.functional.interpolate(t, size=(120, 120), mode="bilinear").to(device)
+            except Exception:
+                pass
+
+        try:
             img = Image.open(path).convert("RGB").resize((120, 120))
             arr = np.array(img, dtype=np.float32) / 255.0  # (120, 120, 3)
             t = torch.from_numpy(arr).permute(2, 0, 1).unsqueeze(0)  # (1, 3, 120, 120)
             t12 = t.repeat(1, 4, 1, 1)  # (1, 12, 120, 120)
             return t12.to(device)
+        except Exception:
+            pass
 
     # Standard fallback test tensor
     return torch.rand(1, 12, 120, 120, device=device).float()

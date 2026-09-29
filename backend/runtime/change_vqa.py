@@ -10,6 +10,7 @@ import json
 import time
 import argparse
 from pathlib import Path
+import numpy as np
 
 # Add project root to sys.path
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -75,8 +76,26 @@ def main():
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
 
-        img_t1 = Image.open(t1_path).convert("RGB")
-        img_t2 = Image.open(t2_path).convert("RGB")
+        def load_image_for_vqa(path: str) -> Image.Image:
+            if path.lower().endswith((".tif", ".tiff")):
+                try:
+                    import rasterio
+                    with rasterio.open(path) as src:
+                        arr = src.read().astype(np.float32)
+                        if arr.shape[0] >= 3:
+                            rgb = arr[:3]
+                        else:
+                            rgb = np.repeat(arr[:1], 3, axis=0)
+                        p99 = np.percentile(rgb, 99) if rgb.size > 0 else 1.0
+                        norm = np.clip(rgb / max(p99, 1e-4) * 255.0, 0, 255).astype(np.uint8)
+                        norm = np.transpose(norm, (1, 2, 0))  # (H, W, 3)
+                        return Image.fromarray(norm, mode="RGB")
+                except Exception:
+                    pass
+            return Image.open(path).convert("RGB")
+
+        img_t1 = load_image_for_vqa(t1_path)
+        img_t2 = load_image_for_vqa(t2_path)
 
         t1_tensor = transform(img_t1).unsqueeze(0).to(device)
         t2_tensor = transform(img_t2).unsqueeze(0).to(device)
