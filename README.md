@@ -367,7 +367,7 @@ Evaluation is complete across the workflow, model and system levels. Testing cov
 - [x] Train and benchmark the optical–SAR prediction path.
 - [x] Add evidence-linked reports and uncertainty handling.
 - [x] Implement Bhoonidhi and Bhuvan provider routes and provenance storage.
-- [ ] Complete live Bhoonidhi retrieval and Bhuvan context queries; verify against upstream services.
+- [x] Complete live Bhoonidhi retrieval and Bhuvan context queries; verify against upstream services.
 - [x] Publish reproducible setup instructions, model configurations and benchmark results.
 
 ## Application areas
