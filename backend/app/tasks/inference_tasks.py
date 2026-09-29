@@ -24,7 +24,7 @@ def execute_internvl_task(image_path: str, prompt: str = "Describe this satellit
         attempt_id="1",
         model_version_id="internvl3",
         task_type="vqa",
-        asset_references={"image": image_path},
+        asset_references={"image": os.path.abspath(image_path)},
         parameters={"prompt": prompt, "max_tokens": settings.MAX_VQA_TOKENS, "context": context},
         output_dir=out_dir
     )
@@ -43,9 +43,9 @@ def execute_croma_task(sentinel_1_path: Optional[str] = None, sentinel_2_path: O
     out_dir = str(Path(settings.SATQUERY_STORAGE_ROOT) / "scratch" / req_id)
     refs = {}
     if sentinel_1_path:
-        refs["sentinel_1"] = sentinel_1_path
+        refs["sentinel_1"] = os.path.abspath(sentinel_1_path)
     if sentinel_2_path:
-        refs["sentinel_2"] = sentinel_2_path
+        refs["sentinel_2"] = os.path.abspath(sentinel_2_path)
 
     req = SubprocessRequest(
         job_id=req_id,
@@ -76,7 +76,7 @@ def execute_changeformer_task(image_t1_path: str, image_t2_path: str) -> Dict[st
         attempt_id="1",
         model_version_id="changeformer",
         task_type="bitemporal_change",
-        asset_references={"image_t1": image_t1_path, "image_t2": image_t2_path},
+        asset_references={"image_t1": os.path.abspath(image_t1_path), "image_t2": os.path.abspath(image_t2_path)},
         parameters={},
         output_dir=out_dir
     )
@@ -99,7 +99,7 @@ def execute_upernet_task(image_path: str) -> Dict[str, Any]:
         attempt_id="1",
         model_version_id="upernet",
         task_type="land_cover_segmentation",
-        asset_references={"image": image_path},
+        asset_references={"image": os.path.abspath(image_path)},
         parameters={},
         output_dir=out_dir
     )
@@ -122,7 +122,7 @@ def execute_geoground_task(image_path: str, prompt: str = "locate objects") -> D
         attempt_id="1",
         model_version_id="geoground",
         task_type="visual_grounding",
-        asset_references={"image": image_path},
+        asset_references={"image": os.path.abspath(image_path)},
         parameters={"prompt": prompt, "threshold": 0.1},
         output_dir=out_dir
     )
@@ -166,9 +166,9 @@ def execute_optical_sar_task(sentinel_1_path: Optional[str] = None, sentinel_2_p
     out_dir = str(Path(settings.SATQUERY_STORAGE_ROOT) / "scratch" / req_id)
     refs = {}
     if sentinel_1_path:
-        refs["sentinel_1"] = sentinel_1_path
+        refs["sentinel_1"] = os.path.abspath(sentinel_1_path)
     if sentinel_2_path:
-        refs["sentinel_2"] = sentinel_2_path
+        refs["sentinel_2"] = os.path.abspath(sentinel_2_path)
 
     req = SubprocessRequest(
         job_id=req_id,
