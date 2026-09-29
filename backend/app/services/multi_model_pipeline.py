@@ -387,10 +387,14 @@ def run_multi_model_pipeline(
 
         if "owlv2" in (plan.required_models if plan else []):
             try:
-                gg_res = execute_geoground_task(s2, prompt)
+                gg_res = execute_geoground_task(opt_path, prompt)
                 if gg_res.get("success"):
                     model_outputs["geoground"] = gg_res
                     participating_models.append("OWLv2 GeoGround")
+                    if gg_res.get("output_assets", {}).get("grounding_overlay"):
+                        output_assets["grounding_overlay"] = gg_res["output_assets"]["grounding_overlay"]
+                else:
+                    partial_failures.append({"model": "OWLv2 GeoGround", "error": gg_res.get("error_message", "Failed")})
             except Exception as e:
                 partial_failures.append({"model": "OWLv2 GeoGround", "error": str(e)})
 
