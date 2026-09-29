@@ -478,9 +478,9 @@ def run_multi_model_pipeline(
     findings_data = {
         "query": prompt,
         "location": location_data,
-        "common_area_km2": (location_data.get("common_area_km2") if location_data else None) or (pair_metrics.get("footprint_km2") if pair_metrics else None) or raster_facts.get("footprint_km2") or 0.332,
-        "candidate_change_area_km2": (pair_metrics.get("changed_area_km2") if pair_metrics else None) or 0.295,
-        "candidate_change_percentage": (pair_metrics.get("change_pct") if pair_metrics else None) or 88.82,
+        "common_area_km2": (location_data.get("common_area_km2") if location_data else None) or (pair_metrics.get("footprint_km2") if pair_metrics else None) or raster_facts.get("footprint_km2"),
+        "candidate_change_area_km2": (pair_metrics.get("changed_area_km2") if pair_metrics else None),
+        "candidate_change_percentage": (pair_metrics.get("change_pct") if pair_metrics else None),
         "crs": (location_data.get("crs") if location_data else None) or raster_facts.get("crs") or "EPSG:4326",
         "resolution_m": (location_data.get("resolution_m") if location_data else None) or raster_facts.get("resolution_m") or 10.0,
         "width": raster_facts.get("width", 0),
@@ -590,9 +590,9 @@ def _build_comprehensive_synthesis(
     """
     findings_data = {
         "query": prompt,
-        "common_area_km2": (pair_metrics.get("footprint_km2") if pair_metrics else None) or raster_facts.get("footprint_km2") or 0.332,
-        "candidate_change_area_km2": (pair_metrics.get("changed_area_km2") if pair_metrics else None) or 0.295,
-        "candidate_change_percentage": (pair_metrics.get("change_pct") if pair_metrics else None) or 88.82,
+        "common_area_km2": (pair_metrics.get("footprint_km2") if pair_metrics else None) or raster_facts.get("footprint_km2"),
+        "candidate_change_area_km2": (pair_metrics.get("changed_area_km2") if pair_metrics else None),
+        "candidate_change_percentage": (pair_metrics.get("change_pct") if pair_metrics else None),
         "crs": raster_facts.get("crs") or "EPSG:4326",
         "resolution_m": raster_facts.get("resolution_m") or 10.0,
         "width": raster_facts.get("width", 0),

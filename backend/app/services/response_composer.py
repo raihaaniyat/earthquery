@@ -122,7 +122,7 @@ def _approximate_words(text: str) -> int:
 
 
 def sanitize_markdown_text(text: str) -> str:
-    """
+    r"""
     Cleans up machine-generated markdown artifacts:
     - Duplicated bold markers like **\*\*
     - Broken bullet points like - •
@@ -395,15 +395,15 @@ def _compose_temporal_change_response(
     target_words = constraints.get("target_words")
     detail_level = constraints.get("detail_level", "moderate")
 
-    footprint = data.get("common_area_km2") or data.get("footprint_km2") or 0.332
-    change_area = data.get("candidate_change_area_km2") or data.get("changed_area_km2") or 0.295
-    change_pct = data.get("candidate_change_percentage") or data.get("change_pct") or 88.82
+    footprint = data.get("common_area_km2") or data.get("footprint_km2")
+    change_area = data.get("candidate_change_area_km2") or data.get("changed_area_km2")
+    change_pct = data.get("candidate_change_percentage") or data.get("change_pct")
     crs = data.get("crs") or "EPSG:4326"
     res = data.get("resolution_m") or 10.0
 
-    fp_str = f"{footprint:.3f} km²" if isinstance(footprint, float) else f"{footprint} km²"
-    ca_str = f"{change_area:.3f} km²" if isinstance(change_area, float) else f"{change_area} km²"
-    pct_str = f"{change_pct:.2f}%" if isinstance(change_pct, float) else f"{change_pct}%"
+    fp_str = f"{footprint:.3f} km²" if isinstance(footprint, (int, float)) else (f"{footprint} km²" if footprint else "the common geographic footprint")
+    ca_str = f"{change_area:.3f} km²" if isinstance(change_area, (int, float)) else (f"{change_area} km²" if change_area else "the candidate change area")
+    pct_str = f"{change_pct:.2f}%" if isinstance(change_pct, (int, float)) else (f"{change_pct}%" if change_pct is not None else "a significant portion")
     res_str = f"{res:g} m" if isinstance(res, (int, float)) else f"{res} m"
 
     p1 = (
@@ -484,17 +484,21 @@ def _compose_evidence_response(
     """
     Directly answers follow-ups like: "What evidence supports that?"
     """
-    change_area = data.get("candidate_change_area_km2") or data.get("changed_area_km2") or 0.295
-    footprint = data.get("common_area_km2") or data.get("footprint_km2") or 0.332
-    change_pct = data.get("candidate_change_percentage") or data.get("change_pct") or 88.82
+    change_area = data.get("candidate_change_area_km2") or data.get("changed_area_km2")
+    footprint = data.get("common_area_km2") or data.get("footprint_km2")
+    change_pct = data.get("candidate_change_percentage") or data.get("change_pct")
     crs = data.get("crs") or "EPSG:4326"
     res = data.get("resolution_m") or 10.0
+
+    ca_str = f"{change_area:.3f} km²" if isinstance(change_area, (int, float)) else (f"{change_area} km²" if change_area else "the candidate change region")
+    fp_str = f"{footprint:.3f} km²" if isinstance(footprint, (int, float)) else (f"{footprint} km²" if footprint else "the shared footprint")
+    pct_str = f"{change_pct:.2f}%" if isinstance(change_pct, (int, float)) else (f"{change_pct}%" if change_pct is not None else "a substantial portion")
 
     p1 = (
         f"The conclusion is supported by three primary categories of empirical evidence derived directly from the observation data:\n\n"
         f"1. **Bitemporal Radiometric Difference Matrix**: Pixel-by-pixel normalized divergence across the registered observation grid "
-        f"identified that approximately {change_area} km² of the {footprint} km² shared geographic footprint exceeds the statistical change threshold. "
-        f"This confirms that the two acquisitions exhibit distinct spectral response profiles across {change_pct}% of their overlapping area.\n\n"
+        f"identified that approximately {ca_str} of {fp_str} exceeds the statistical change threshold. "
+        f"This confirms that the two acquisitions exhibit distinct spectral response profiles across {pct_str} of their overlapping area.\n\n"
         f"2. **Spatial Coregistration and Grid Integrity**: Both scenes were aligned to a shared {res} m spatial grid in {crs}. "
         f"The spatial restriction ensures that boundary artifacts from non-overlapping areas were excluded from the computation, "
         f"verifying that the measured variance occurs within shared real-world ground coordinates.\n\n"
@@ -504,8 +508,8 @@ def _compose_evidence_response(
     )
 
     supporting = [
-        f"Radiometric divergence exceeds threshold across {change_pct}% of registered pixels.",
-        f"Evaluation bounded to common intersecting extent ({footprint} km² at {res} m GSD).",
+        f"Radiometric divergence exceeds threshold across {pct_str} of registered pixels.",
+        f"Evaluation bounded to common intersecting extent ({fp_str} at {res} m GSD).",
         "Empirical absence of structural object confirmation dictates candidate classification."
     ]
 
@@ -519,13 +523,17 @@ def _compose_most_important_finding_response(
     """
     Answers: "Can you explain the most important finding?"
     """
-    change_area = data.get("candidate_change_area_km2") or data.get("changed_area_km2") or 0.295
-    footprint = data.get("common_area_km2") or data.get("footprint_km2") or 0.332
-    change_pct = data.get("candidate_change_percentage") or data.get("change_pct") or 88.82
+    change_area = data.get("candidate_change_area_km2") or data.get("changed_area_km2")
+    footprint = data.get("common_area_km2") or data.get("footprint_km2")
+    change_pct = data.get("candidate_change_percentage") or data.get("change_pct")
+
+    pct_str = f"approximately {change_pct:.2f}%" if isinstance(change_pct, (int, float)) else "a significant portion"
+    area_str = f" ({change_area:.3f} km²)" if isinstance(change_area, (int, float)) else ""
+    fp_str = f" of the {footprint:.3f} km² shared study area" if isinstance(footprint, (int, float)) else " across the shared study area"
 
     p1 = (
-        f"The most important finding from the analysis is that **approximately {change_pct}% ({change_area} km²) of the "
-        f"{footprint} km² shared study area exhibits detectable candidate surface change between the two satellite observations**."
+        f"The most important finding from the analysis is that **{pct_str}{area_str}"
+        f"{fp_str} exhibits detectable candidate surface change between the two satellite observations**."
     )
     p2 = (
         f"What makes this finding significant is its spatial extent: the changes are not restricted to minor isolated features, "
@@ -1073,10 +1081,10 @@ def _expand_to_target_word_count(
 
     # Branch C: Temporal Change (Canonical 300-word response)
     else:
-        change_area = data.get("candidate_change_area_km2") or data.get("changed_area_km2") or 0.295
-        change_pct = data.get("candidate_change_percentage") or data.get("change_pct") or 88.82
-        ca_str = f"{change_area:.3f} km²" if isinstance(change_area, float) else f"{change_area} km²"
-        pct_str = f"{change_pct:.2f}%" if isinstance(change_pct, float) else f"{change_pct}%"
+        change_area = data.get("candidate_change_area_km2") or data.get("changed_area_km2")
+        change_pct = data.get("candidate_change_percentage") or data.get("change_pct")
+        ca_str = f"{change_area:.3f} km²" if isinstance(change_area, (int, float)) else (f"{change_area} km²" if change_area else "the candidate change area")
+        pct_str = f"{change_pct:.2f}%" if isinstance(change_pct, (int, float)) else (f"{change_pct}%" if change_pct is not None else "a significant portion")
 
         p1 = (
             f"The temporal comparison indicates substantial image-level change across the shared study area. "
