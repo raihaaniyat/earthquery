@@ -22,6 +22,8 @@ import type {
   ReportEntry,
   TaskType } from
 '../types/app';
+import type { GeoTiffLayer } from '../types/geotiff';
+import { layerToAttachedImage } from '../utils/geotiff';
 
 interface WorkspaceValue {
   query: string;
@@ -48,6 +50,12 @@ interface WorkspaceValue {
   temporalImages: AttachedImage[];
   addTemporalFiles: (files: FileList | File[]) => Promise<void>;
   removeTemporalImage: (id: string) => void;
+  uploadedImages: AttachedImage[];
+  addUploadedImage: (img: AttachedImage) => void;
+  selectImageForComparison: (img: AttachedImage, slot: 'before' | 'after') => void;
+  geoTiffLayers: GeoTiffLayer[];
+  addGeoTiffLayer: (layer: GeoTiffLayer) => void;
+  removeGeoTiffLayer: (id: string) => void;
   buildRequest: (task: TaskType, query: string, extra?: Partial<AnalysisRequest>) => AnalysisRequest;
   history: HistoryEntry[];
   logHistory: (e: Omit<HistoryEntry, 'id' | 'createdAt' | 'model'> & {model?: string;}) => HistoryEntry;
@@ -107,8 +115,46 @@ export function WorkspaceProvider({ children }: {children: React.ReactNode;}) {
   const [comparisonPair, setPair] = useState<ComparisonPair>({ before: null, after: null });
   const [pendingDiff, setPendingDiff] = useState(false);
   const [temporalImages, setTemporalImages] = useState<AttachedImage[]>([]);
+  const [uploadedImages, setUploadedImages] = useState<AttachedImage[]>([]);
+  const [geoTiffLayers, setGeoTiffLayers] = useState<GeoTiffLayer[]>([]);
   const [history, setHistory] = usePersistentState<HistoryEntry[]>('satquery-history', []);
   const [reports, setReports] = usePersistentState<ReportEntry[]>('satquery-reports', []);
+
+  const addUploadedImage = useCallback((img: AttachedImage) => {
+    setUploadedImages((prev) => {
+      if (prev.some((p) => p.name === img.name && p.size === img.size)) return prev;
+      return [...prev, img];
+    });
+    setTemporalImages((prev) => {
+      if (prev.some((p) => p.name === img.name && p.size === img.size)) return prev;
+      return [...prev, img];
+    });
+  }, []);
+
+  const addGeoTiffLayer = useCallback((layer: GeoTiffLayer) => {
+    setGeoTiffLayers((prev) => {
+      if (prev.some((l) => l.name === layer.name && l.file.size === layer.file.size)) return prev;
+      return [layer, ...prev];
+    });
+    const attached = layerToAttachedImage(layer);
+    setUploadedImages((prev) => {
+      if (prev.some((p) => p.name === attached.name && p.size === attached.size)) return prev;
+      return [...prev, attached];
+    });
+    setTemporalImages((prev) => {
+      if (prev.some((p) => p.name === attached.name && p.size === attached.size)) return prev;
+      return [...prev, attached];
+    });
+  }, []);
+
+  const removeGeoTiffLayer = useCallback((id: string) => {
+    setGeoTiffLayers((prev) => prev.filter((l) => l.id !== id));
+  }, []);
+
+  const selectImageForComparison = useCallback((img: AttachedImage, slot: 'before' | 'after') => {
+    setPair((prev) => ({ ...prev, [slot]: img }));
+    toast(`Selected ${img.name} as Image ${slot === 'before' ? 'A' : 'B'}`);
+  }, [toast]);
 
   // Multi-Turn Persistent Conversational Analyst state
   const [conversationId, setConversationId] = usePersistentState<string | null>('satquery-active-conv-id', null);
@@ -141,7 +187,21 @@ export function WorkspaceProvider({ children }: {children: React.ReactNode;}) {
       if (!list.length) return;
       const loaded = await Promise.all(list.map(loadAttachedImage));
       setAttachments((prev) => [...prev, ...loaded].slice(0, 8));
-      toast(`${loaded.length} image${loaded.length > 1 ? 's' : ''} attached`);
+      setUploadedImages((prev) => {
+        const next = [...prev];
+        for (const img of loaded) {
+          if (!next.some((p) => p.name === img.name && p.size === img.size)) next.push(img);
+        }
+        return next;
+      });
+      setTemporalImages((prev) => {
+        const next = [...prev];
+        for (const img of loaded) {
+          if (!next.some((p) => p.name === img.name && p.size === img.size)) next.push(img);
+        }
+        return next;
+      });
+      toast(`${loaded.length} image${loaded.length > 1 ? 's' : ''} loaded`);
     },
     [toast]
   );
@@ -155,7 +215,20 @@ export function WorkspaceProvider({ children }: {children: React.ReactNode;}) {
       const list = Array.from(files);
       if (!list.length) return;
       const loaded = await Promise.all(list.map(loadAttachedImage));
-      setTemporalImages((prev) => [...prev, ...loaded]);
+      setTemporalImages((prev) => {
+        const next = [...prev];
+        for (const img of loaded) {
+          if (!next.some((p) => p.name === img.name && p.size === img.size)) next.push(img);
+        }
+        return next;
+      });
+      setUploadedImages((prev) => {
+        const next = [...prev];
+        for (const img of loaded) {
+          if (!next.some((p) => p.name === img.name && p.size === img.size)) next.push(img);
+        }
+        return next;
+      });
       toast(`${loaded.length} temporal image${loaded.length > 1 ? 's' : ''} loaded`);
     },
     [toast]
@@ -731,6 +804,12 @@ export function WorkspaceProvider({ children }: {children: React.ReactNode;}) {
       temporalImages,
       addTemporalFiles,
       removeTemporalImage,
+      uploadedImages,
+      addUploadedImage,
+      selectImageForComparison,
+      geoTiffLayers,
+      addGeoTiffLayer,
+      removeGeoTiffLayer,
       buildRequest,
       history,
       logHistory,
@@ -755,7 +834,9 @@ export function WorkspaceProvider({ children }: {children: React.ReactNode;}) {
     [
       query, attachments, addFiles, removeAttachment, aoi, imagery, updateImagery, mapTool, activeTool, chat,
       startAnalysis, rerunChat, newAnalysis, comparisonPair, setComparisonPair, pendingDiff, temporalImages,
-      addTemporalFiles, removeTemporalImage, buildRequest, history, logHistory, logResult, setHistory, reports,
+      addTemporalFiles, removeTemporalImage, uploadedImages, addUploadedImage, selectImageForComparison,
+      geoTiffLayers, addGeoTiffLayer, removeGeoTiffLayer,
+      buildRequest, history, logHistory, logResult, setHistory, reports,
       createReport, setReports, conversationId, conversationSnapshot, isConversationLoading, conversationError,
       latestMapAction, setLatestMapAction, loadConversation, sendFollowUp, retryLastTurn, deleteConversationById,
       newChat

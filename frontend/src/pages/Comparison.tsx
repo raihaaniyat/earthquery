@@ -18,7 +18,7 @@ const MODES: {id: Mode;label: string;}[] = [
 
 export function Comparison() {
   const { toast } = useApp();
-  const { comparisonPair, setComparisonPair, pendingDiff, clearPendingDiff, logHistory } = useWorkspace();
+  const { comparisonPair, setComparisonPair, pendingDiff, clearPendingDiff, logHistory, addUploadedImage } = useWorkspace();
   const [mode, setMode] = useState<Mode>('curtain');
   const [threshold, setThreshold] = useState(48);
   const [diff, setDiff] = useState<RequestState<DiffResult>>({ status: 'idle' });
@@ -62,6 +62,7 @@ export function Comparison() {
   const addMany = async (files: FileList) => {
     const list = Array.from(files).slice(0, 2);
     const loaded = await Promise.all(list.map(loadAttachedImage));
+    loaded.forEach(addUploadedImage);
     if (loaded.length === 1) setComparisonPair(before ? { before, after: loaded[0] } : { before: loaded[0], after });else
     setComparisonPair({ before: loaded[0], after: loaded[1] });
     setDiff({ status: 'idle' });
@@ -70,6 +71,7 @@ export function Comparison() {
 
   const setSlot = async (side: 'before' | 'after', file: File) => {
     const img = await loadAttachedImage(file);
+    addUploadedImage(img);
     setComparisonPair({ ...comparisonPair, [side]: img });
     setDiff({ status: 'idle' });
   };
@@ -151,10 +153,15 @@ export function Comparison() {
           <CurtainViewer
             beforeUrl={before?.previewable ? before.url : null}
             afterUrl={after?.previewable ? after.url : null}
-            beforeLabel={before?.name ?? 'A'}
-            afterLabel={after?.name ?? 'B'}
+            beforeLabel={before?.name ?? 'Image A'}
+            afterLabel={after?.name ?? 'Image B'}
             mode={mode === 'difference' ? 'curtain' : mode}
-            emptyText="Upload two browser-readable images (PNG, JPG or WebP) to compare." />
+            beforeStatus={before?.previewStatus}
+            afterStatus={after?.previewStatus}
+            beforeImage={before}
+            afterImage={after}
+            emptyText="Upload two images to compare (PNG, JPG, WebP or GeoTIFF)."
+          />
           
         </div>
         <canvas

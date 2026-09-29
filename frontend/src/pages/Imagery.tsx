@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { ScanSearchIcon, Building2Icon, ArrowLeftRightIcon, CheckIcon, CircleIcon, LoaderCircleIcon, XIcon, ArrowRightIcon } from 'lucide-react';
+import { ScanSearchIcon, ArrowLeftRightIcon, CheckIcon, CircleIcon, LoaderCircleIcon, XIcon, ArrowRightIcon, FileImageIcon, PlusIcon } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { ImageDropZone } from '../components/ImageDropZone';
@@ -13,7 +13,17 @@ import type { AnalysisResponse, ModelSettings, RequestState, TaskType } from '..
 
 export function Imagery() {
   const { modelSettings, updateModelSettings, openDrawer, toast } = useApp();
-  const { comparisonPair, setComparisonPair, buildRequest, logResult, logHistory } = useWorkspace();
+  const {
+    comparisonPair,
+    setComparisonPair,
+    uploadedImages,
+    addUploadedImage,
+    addFiles,
+    selectImageForComparison,
+    buildRequest,
+    logResult,
+    logHistory
+  } = useWorkspace();
   const [query, setQuery] = useState('What changed between these two images?');
   const [threshold, setThreshold] = useState(48);
   const [diff, setDiff] = useState<RequestState<DiffResult>>({ status: 'idle' });
@@ -25,6 +35,7 @@ export function Imagery() {
   const setSide = async (side: 'before' | 'after', file: File) => {
     const img = await loadAttachedImage(file);
     setComparisonPair({ ...comparisonPair, [side]: img });
+    addUploadedImage(img);
     setDiff({ status: 'idle' });
   };
 
@@ -99,6 +110,136 @@ export function Imagery() {
 
       <div className="page-grid">
         <div className="leftcol">
+          {/* Shared Uploaded Imagery Pool */}
+          {uploadedImages.length > 0 && (
+            <div className="panel panel-pad" style={{ marginBottom: 14 }}>
+              <div className="toolbar" style={{ marginBottom: 10 }}>
+                <b style={{ fontSize: '13px' }}>Shared Uploaded Imagery</b>
+                <span className="badge">{uploadedImages.length} available</span>
+                <span className="spacer" />
+                <label className="btn small file-btn">
+                  <PlusIcon size={12} /> Upload More
+                  <input
+                    type="file"
+                    multiple
+                    accept="image/*,.tif,.tiff"
+                    onChange={(e) => {
+                      if (e.target.files) void addFiles(e.target.files);
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+              </div>
+
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+                  gap: '10px'
+                }}
+              >
+                {uploadedImages.map((img) => {
+                  const isA = before?.id === img.id;
+                  const isB = after?.id === img.id;
+                  const dims = img.width && img.height ? `${img.width} × ${img.height}` : 'Dimensions pending';
+                  const bandsText = img.bands ? `${img.bands} band${img.bands === 1 ? '' : 's'}` : (img.type.includes('tiff') ? 'Multispectral GeoTIFF' : 'RGB 3-Band');
+                  const crsText = img.crsName || img.crs || (img.isGeoTiff ? 'CRS: Referenced' : null);
+                  return (
+                    <div
+                      key={img.id}
+                      style={{
+                        background: 'rgba(15, 23, 42, 0.7)',
+                        border: isA || isB ? '1px solid var(--accent)' : '1px solid rgba(255, 255, 255, 0.08)',
+                        borderRadius: '8px',
+                        padding: '10px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '6px',
+                        fontSize: '11px',
+                        position: 'relative'
+                      }}
+                    >
+                      <div
+                        style={{
+                          height: '100px',
+                          background: 'rgba(0, 0, 0, 0.35)',
+                          borderRadius: '6px',
+                          overflow: 'hidden',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          position: 'relative'
+                        }}
+                      >
+                        {img.previewable ? (
+                          <img
+                            src={img.url}
+                            alt={img.name}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            onError={(e) => {
+                              (e.target as HTMLElement).style.display = 'none';
+                            }}
+                          />
+                        ) : img.previewStatus === 'loading' ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', color: 'var(--accent)' }}>
+                            <LoaderCircleIcon className="spin" size={20} />
+                            <span style={{ fontSize: '10px' }}>Generating preview...</span>
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', opacity: 0.5, textAlign: 'center', padding: '6px' }}>
+                            <FileImageIcon size={24} />
+                            <span style={{ fontSize: '9px' }}>Preview unavailable</span>
+                          </div>
+                        )}
+                        {img.isGeoTiff && (
+                          <span
+                            style={{
+                              position: 'absolute',
+                              top: '4px',
+                              left: '4px',
+                              background: img.isSar ? 'rgba(168, 85, 247, 0.85)' : 'rgba(14, 165, 233, 0.85)',
+                              color: '#fff',
+                              fontSize: '9px',
+                              fontWeight: 600,
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                              letterSpacing: '0.3px'
+                            }}
+                          >
+                            {img.isSar ? 'SAR' : 'GeoTIFF'}
+                          </span>
+                        )}
+                      </div>
+                      <b style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--text)' }} title={img.name}>
+                        {img.name}
+                      </b>
+                      <div style={{ color: '#94a3b8', fontSize: '10px', lineHeight: 1.4 }}>
+                        <div>{dims} · {bandsText}</div>
+                        {crsText && <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={crsText}>{crsText}</div>}
+                      </div>
+                      <div style={{ marginTop: 'auto', display: 'flex', gap: '4px', paddingTop: '4px' }}>
+                        <button
+                          className={`btn small${isA ? ' green' : ''}`}
+                          style={{ flex: 1, padding: '3px 4px', fontSize: '10px' }}
+                          onClick={() => selectImageForComparison(img, 'before')}
+                        >
+                          {isA ? '✓ Image A' : 'Set as A'}
+                        </button>
+                        <button
+                          className={`btn small${isB ? ' green' : ''}`}
+                          style={{ flex: 1, padding: '3px 4px', fontSize: '10px' }}
+                          onClick={() => selectImageForComparison(img, 'after')}
+                        >
+                          {isB ? '✓ Image B' : 'Set as B'}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           <div className="panel panel-pad">
             <div className="panel-title">
               Input imagery <span className="badge">Optical / SAR</span>
@@ -137,9 +278,6 @@ export function Imagery() {
               </button>
               <button className="btn small" onClick={() => void runBackend('describe')} disabled={backend.status === 'loading'}>
                 <ScanSearchIcon size={12} /> Describe scene
-              </button>
-              <button className="btn small" onClick={() => void runBackend('buildings')} disabled={backend.status === 'loading'}>
-                <Building2Icon size={12} /> Find buildings
               </button>
               <span className="spacer" />
               <div className="range-row" style={{ minWidth: 200 }}>

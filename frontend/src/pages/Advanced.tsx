@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { MapIcon, CrosshairIcon, ArrowRightIcon } from 'lucide-react';
+import { MapIcon, CrosshairIcon, ArrowRightIcon, SparklesIcon, XIcon } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { StateNotice } from '../components/StateNotice';
@@ -14,7 +14,7 @@ const TOOL_TASK: Partial<Record<AdvancedToolId, TaskType>> = { spectral: 'spectr
 
 export function Advanced() {
   const { navigate } = useApp();
-  const { activeTool, setActiveTool, setMapTool, aoi, imagery, updateImagery, buildRequest, logResult } = useWorkspace();
+  const { activeTool, setActiveTool, setMapTool, aoi, setAoi, imagery, updateImagery, setQuery, buildRequest, logResult } = useWorkspace();
   const [run, setRun] = useState<RequestState<AnalysisResponse>>({ status: 'idle' });
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -83,7 +83,18 @@ export function Advanced() {
             Preview the {overlay.label.toLowerCase()} product on the map for the selected date, then run the specialist model on your AOI.
           </p>
           <div className="chips">
-            <span className="chip">AOI: {aoi ? describeAoi(aoi) : 'Not selected'}</span>
+            <span className="chip" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+              AOI: {aoi ? describeAoi(aoi) : 'Not selected'}
+              {aoi && (
+                <button
+                  onClick={() => setAoi(null)}
+                  style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', padding: '0 2px' }}
+                  title="Clear AOI"
+                >
+                  <XIcon size={12} />
+                </button>
+              )}
+            </span>
             <span className="chip">Date: {imagery.date}</span>
             <span className="chip">Layer: {overlay.label}</span>
             <span className="chip">Model: {buildRequest(task, '').model}</span>
@@ -99,18 +110,28 @@ export function Advanced() {
               <MapIcon size={14} /> Show on map
             </button>
             {!aoi &&
-          <button
-            className="btn"
-            onClick={() => {
-              setMapTool('rectangle');
-              navigate('map');
-            }}>
-            
+              <button
+                className="btn"
+                onClick={() => {
+                  setMapTool('rectangle');
+                  navigate('map');
+                }}>
                 <CrosshairIcon size={14} /> Select AOI
               </button>
-          }
+            }
             <button className="btn green" onClick={() => void runTool()} disabled={run.status === 'loading'}>
               Run {tool.title.toLowerCase()} analysis <ArrowRightIcon size={14} />
+            </button>
+            <button
+              className="btn primary"
+              onClick={() => {
+                const promptText = `${tool.title} analysis for the selected AOI${aoi ? ` (${describeAoi(aoi)})` : ''} on ${imagery.date}. Focus on ${overlay.label.toLowerCase()} characteristics and anomalies.`;
+                setQuery(promptText);
+                navigate('home');
+              }}
+              title="Continue this specialist analysis in the AI Analyst workspace"
+            >
+              <SparklesIcon size={14} /> Send to AI Analyst
             </button>
           </div>
           <StateNotice state={run} onRetry={() => void runTool()} />

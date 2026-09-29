@@ -22,6 +22,7 @@ import { useMapDrawing } from '../hooks/useMapDrawing';
 import { ImageryControls } from '../components/map/ImageryControls';
 import { MapLayersPanel } from '../components/map/MapLayersPanel';
 import { AoiPanel } from '../components/map/AoiPanel';
+import { AoiCoordinateDisplay } from '../components/map/AoiCoordinateDisplay';
 import { BASEMAPS, STAC_COLLECTIONS } from '../data/apiConfig';
 import { searchStac } from '../utils/api';
 import { describeAoi, formatDistance, formatLatLng } from '../utils/geo';
@@ -177,6 +178,23 @@ export function MapAoi() {
 
             })}
           </div>
+          {aoi && (
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+              <span className="badge ok" style={{ fontSize: '11px', padding: '3px 8px' }}>
+                AOI selected
+              </span>
+              <button
+                className="btn small danger-text"
+                onClick={() => {
+                  setAoi(null);
+                  toast('AOI cleared');
+                }}
+                title="Clear selected AOI"
+              >
+                Clear AOI
+              </button>
+            </div>
+          )}
           <span className="spacer" />
           <div className="tool-group" role="group" aria-label="Basemap">
             {BASEMAPS.map((b) =>
@@ -277,21 +295,12 @@ export function MapAoi() {
               </button>
             </div>
             {sat.cursor && <div className="map-label coords">{formatLatLng(sat.cursor)}</div>}
+            <AoiCoordinateDisplay aoi={aoi} onClear={() => { setAoi(null); toast('AOI cleared'); }} />
             {imagery.compare &&
             <>
                 <span className="view-tag left" style={{ top: 52, zIndex: 500 }}>BEFORE · {imagery.compareDate}</span>
                 <span className="view-tag right" style={{ top: 52, right: 58, zIndex: 500 }}>AFTER · {imagery.date}</span>
                 <div className="map-compare-line" style={{ left: `${comparePos}%` }} />
-                <div className="map-compare-range">
-                  <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  value={comparePos}
-                  onChange={(e) => setComparePos(Number(e.target.value))}
-                  aria-label="Split-screen compare position" />
-                
-                </div>
               </>
             }
             {fullscreen &&
@@ -300,6 +309,40 @@ export function MapAoi() {
               </button>
             }
           </div>
+
+          {/* Dedicated bottom timeline comparison slider bar */}
+          {imagery.compare && (
+            <div
+              className="map-timeline-bottom-bar"
+              style={{
+                marginTop: '6px',
+                padding: '8px 14px',
+                background: 'rgba(15, 23, 42, 0.9)',
+                backdropFilter: 'blur(8px)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                borderRadius: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                fontSize: '12px',
+                color: 'var(--text)'
+              }}
+            >
+              <span style={{ fontWeight: 600, color: 'var(--accent)' }}>Compare Timeline:</span>
+              <span style={{ color: '#94a3b8' }}>{imagery.compareDate}</span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={comparePos}
+                onChange={(e) => setComparePos(Number(e.target.value))}
+                style={{ flex: 1, cursor: 'pointer' }}
+                aria-label="Split-screen compare timeline slider"
+              />
+              <span style={{ color: '#94a3b8' }}>{imagery.date}</span>
+              <span className="badge" style={{ fontSize: '11px' }}>{comparePos}%</span>
+            </div>
+          )}
 
           <ImageryControls
             imagery={imagery}

@@ -33,7 +33,6 @@ export const workspaceNav: NavItem[] = [
   { page: 'geotiff', label: 'GeoTIFF viewer', icon: GlobeIcon },
   { page: 'analyze', label: 'Imagery', icon: ImageIcon },
   { page: 'map', label: 'Map & AOI', icon: CrosshairIcon },
-  { page: 'advanced', label: 'Advanced analysis', icon: LayersIcon },
   { page: 'temporal', label: 'Temporal', icon: Clock3Icon }
 ];
 

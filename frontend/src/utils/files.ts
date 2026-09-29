@@ -5,14 +5,56 @@ export function createId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-/** Loads a local file. Formats the browser cannot decode (e.g. GeoTIFF) are kept for backend upload. */
-export function loadAttachedImage(file: File): Promise<AttachedImage> {
+import { loadGeoTiffAsAttachedImage } from './geotiff';
+
+/**
+ * Loads a local file into a first-class AttachedImage representation.
+ * GeoTIFF files (.tif/.tiff) are automatically processed to generate visual raster previews,
+ * extract CRS/dimensions/bands/SAR status, and preserve the original binary for analysis.
+ */
+export async function loadAttachedImage(file: File): Promise<AttachedImage> {
+  const lower = file.name.toLowerCase();
+  const isTiff = lower.endsWith('.tif') || lower.endsWith('.tiff') || file.type.includes('tiff');
+
+  if (isTiff) {
+    return loadGeoTiffAsAttachedImage(file);
+  }
+
   const url = URL.createObjectURL(file);
-  const base = { id: createId(), name: file.name, size: file.size, type: file.type || 'image/tiff', url, file };
+  const base: AttachedImage = {
+    id: createId(),
+    name: file.name,
+    size: file.size,
+    type: file.type || 'image/png',
+    url,
+    file,
+    width: 0,
+    height: 0,
+    previewable: false,
+    image: null,
+    isGeoTiff: false,
+    previewStatus: 'loading'
+  };
+
   return new Promise((resolve) => {
     const img = new Image();
-    img.onload = () => resolve({ ...base, width: img.naturalWidth, height: img.naturalHeight, previewable: true, image: img });
-    img.onerror = () => resolve({ ...base, width: 0, height: 0, previewable: false, image: null });
+    img.onload = () => resolve({
+      ...base,
+      width: img.naturalWidth,
+      height: img.naturalHeight,
+      previewable: true,
+      image: img,
+      previewStatus: 'ready'
+    });
+    img.onerror = () => resolve({
+      ...base,
+      width: 0,
+      height: 0,
+      previewable: false,
+      image: null,
+      previewStatus: 'error',
+      previewError: 'Browser could not decode image format.'
+    });
     img.src = url;
   });
 }

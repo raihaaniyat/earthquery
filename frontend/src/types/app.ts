@@ -81,6 +81,8 @@ export interface ImagerySettings {
   showAoi: boolean;
 }
 
+import type { GeoTiffBbox, GeoTiffMetadata, GeoTiffWgs84Bounds } from './geotiff';
+
 export interface AttachedImage {
   id: string;
   name: string;
@@ -92,6 +94,21 @@ export interface AttachedImage {
   height: number;
   previewable: boolean;
   image: HTMLImageElement | null;
+  // GeoTIFF & Geospatial extensions
+  isGeoTiff?: boolean;
+  isSar?: boolean;
+  crs?: string;
+  crsName?: string;
+  epsg?: number | null;
+  bounds?: [[number, number], [number, number]]; // Leaflet bounds
+  wgs84Bounds?: GeoTiffWgs84Bounds;
+  nativeBbox?: GeoTiffBbox;
+  bands?: number;
+  dataType?: string;
+  metadata?: GeoTiffMetadata;
+  previewStatus?: 'idle' | 'loading' | 'ready' | 'error';
+  previewError?: string;
+  mapImageUrl?: string;
 }
 
 export type ApiResult<T> =
@@ -122,6 +139,7 @@ export interface ScientificSections {
 
 export interface AnalysisResponse {
   summary: string;
+  supporting_findings?: string[];
   findings?: AnalysisFinding[];
   maskUrl?: string;
   model?: string;
@@ -251,6 +269,7 @@ export interface ConversationMessageItem {
   created_at: string | null;
   metadata?: Record<string, any>;
   summary?: string;
+  supporting_findings?: string[];
   findings?: AnalysisFinding[];
   sections?: ScientificSections;
   model?: string;
@@ -304,6 +323,7 @@ export interface ConversationTurnResponse {
     created_at: string | null;
   };
   summary: string;
+  supporting_findings?: string[];
   findings: AnalysisFinding[];
   sections: ScientificSections;
   model: string;

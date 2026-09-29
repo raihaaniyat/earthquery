@@ -8,7 +8,7 @@ import type { AdvancedToolId, PageId } from '../types/app';
 
 export function Sidebar() {
   const { page, navigate, sidebarCollapsed, mobileNavOpen } = useApp();
-  const { newAnalysis, setActiveTool, setMapTool, activeTool } = useWorkspace();
+  const { newAnalysis, setActiveTool, setMapTool, activeTool, conversationId, chat } = useWorkspace();
   const [toolsOpen, setToolsOpen] = useState(true);
 
   const isActive = (p: PageId) => p === page || p === 'home' && page === 'chat';
@@ -28,11 +28,18 @@ export function Sidebar() {
 
   const renderItem = (item: NavItem) => {
     const Icon = item.icon;
+    const handleClick = () => {
+      if (item.page === 'home' && (conversationId || chat)) {
+        navigate('chat');
+        return;
+      }
+      navigate(item.page);
+    };
     return (
       <button
         key={item.page}
         className={`side-item${isActive(item.page) ? ' active' : ''}`}
-        onClick={() => navigate(item.page)}
+        onClick={handleClick}
         title={sidebarCollapsed ? item.label : undefined}
         aria-current={isActive(item.page) ? 'page' : undefined}>
         

@@ -10,7 +10,7 @@ import { GreennessChart } from '../components/GreennessChart';
 import { STAC_COLLECTIONS } from '../data/apiConfig';
 import { api, searchStac } from '../utils/api';
 import { computeGreenness } from '../utils/imageDiff';
-import type { AnalysisResponse, RequestState, StacScene } from '../types/app';
+import type { AnalysisResponse, RequestState, StacScene, AttachedImage } from '../types/app';
 
 interface TemporalItem {
   id: string;
@@ -20,6 +20,9 @@ interface TemporalItem {
   source: 'local' | 'stac';
   localIndex: number | null;
   date: string | null;
+  attachedImage?: AttachedImage;
+  previewReady?: boolean;
+  previewStatus?: 'idle' | 'loading' | 'ready' | 'error';
 }
 
 const FUNCTIONS = [
@@ -37,7 +40,17 @@ const MODES: {id: ViewerMode;label: string;}[] = [
 
 export function Temporal() {
   const { navigate, toast } = useApp();
-  const { temporalImages, addTemporalFiles, removeTemporalImage, aoi, imagery, buildRequest, logResult, setComparisonPair } = useWorkspace();
+  const {
+    temporalImages,
+    uploadedImages,
+    addTemporalFiles,
+    removeTemporalImage,
+    aoi,
+    imagery,
+    buildRequest,
+    logResult,
+    setComparisonPair
+  } = useWorkspace();
   const [scenes, setScenes] = useState<StacScene[]>([]);
   const [sceneState, setSceneState] = useState<RequestState<StacScene[]>>({ status: 'idle' });
   const [beforeId, setBeforeId] = useState<string | null>(null);
@@ -46,16 +59,27 @@ export function Temporal() {
   const [run, setRun] = useState<RequestState<AnalysisResponse>>({ status: 'idle' });
   const [activeFn, setActiveFn] = useState('timeline');
 
+  // Unified local imagery pool: includes all uploaded GeoTIFFs and temporal images
+  const allLocalImages = useMemo(() => {
+    const map = new Map<string, AttachedImage>();
+    for (const img of uploadedImages) map.set(img.id, img);
+    for (const img of temporalImages) map.set(img.id, img);
+    return Array.from(map.values());
+  }, [temporalImages, uploadedImages]);
+
   const items: TemporalItem[] = useMemo(
     () => [
-    ...temporalImages.map((img, i) => ({
+    ...allLocalImages.map((img, i) => ({
       id: img.id,
       label: `Image ${String.fromCharCode(65 + i % 26)}`,
       sub: img.name,
-      url: img.previewable ? img.url : null,
+      url: img.url,
       source: 'local' as const,
       localIndex: i,
-      date: null
+      date: null,
+      attachedImage: img,
+      previewReady: img.previewable,
+      previewStatus: img.previewStatus ?? (img.previewable ? 'ready' : 'idle')
     })),
     ...scenes.map((s) => ({
       id: s.id,
@@ -64,10 +88,12 @@ export function Temporal() {
       url: s.thumbnail,
       source: 'stac' as const,
       localIndex: null,
-      date: s.datetime.slice(0, 10)
+      date: s.datetime.slice(0, 10),
+      previewReady: Boolean(s.thumbnail),
+      previewStatus: 'ready' as const
     }))],
 
-    [temporalImages, scenes]
+    [allLocalImages, scenes]
   );
 
   useEffect(() => {
@@ -173,20 +199,48 @@ export function Temporal() {
           onRetry={() => void loadScenes()} />
         
         <div className="image-strip">
-          {items.map((it) =>
-          <div key={it.id} className={`image-tile${it.id === beforeId || it.id === afterId ? ' selected' : ''}`}>
-              <div className="mini">
+          {items.map((it) => (
+            <div
+              key={it.id}
+              className={`image-tile${it.id === beforeId || it.id === afterId ? ' selected' : ''}`}
+            >
+              <div className="mini" style={{ position: 'relative' }}>
                 <SafeThumb src={it.url} alt={it.sub} />
+                {it.attachedImage?.isGeoTiff && (
+                  <span
+                    style={{
+                      position: 'absolute',
+                      bottom: '2px',
+                      left: '2px',
+                      background: it.attachedImage.isSar ? 'rgba(168, 85, 247, 0.85)' : 'rgba(14, 165, 233, 0.85)',
+                      color: '#fff',
+                      fontSize: '8px',
+                      fontWeight: 700,
+                      padding: '1px 4px',
+                      borderRadius: '3px',
+                      lineHeight: 1
+                    }}
+                  >
+                    {it.attachedImage.isSar ? 'SAR' : 'GeoTIFF'}
+                  </span>
+                )}
               </div>
-              <b>{it.label}</b>
-              <small>{it.sub}</small>
-              {it.source === 'local' &&
-            <button className="tile-remove" onClick={() => removeTemporalImage(it.id)} aria-label={`Remove ${it.sub}`}>
+              <b>
+                {it.label}
+                {it.id === beforeId ? ' (BEFORE)' : it.id === afterId ? ' (AFTER)' : ''}
+              </b>
+              <small title={it.sub}>{it.sub}</small>
+              {it.source === 'local' && (
+                <button
+                  className="tile-remove"
+                  onClick={() => removeTemporalImage(it.id)}
+                  aria-label={`Remove ${it.sub}`}
+                >
                   <XIcon size={12} />
                 </button>
-            }
+              )}
             </div>
-          )}
+          ))}
           <label className="image-tile add-tile">
             <PlusIcon size={18} />
             <small>Add dated images</small>
@@ -198,8 +252,8 @@ export function Temporal() {
               onChange={(e) => {
                 if (e.target.files?.length) void addTemporalFiles(e.target.files);
                 e.target.value = '';
-              }} />
-            
+              }}
+            />
           </label>
         </div>
       </div>
@@ -210,22 +264,36 @@ export function Temporal() {
             <b>Multi-date comparison</b>
             <span className="spacer" />
             <div className="mode-tabs" role="tablist">
-              {MODES.map((m) =>
-              <button key={m.id} role="tab" aria-selected={mode === m.id} className={mode === m.id ? 'active' : ''} onClick={() => setMode(m.id)}>
+              {MODES.map((m) => (
+                <button
+                  key={m.id}
+                  role="tab"
+                  aria-selected={mode === m.id}
+                  className={mode === m.id ? 'active' : ''}
+                  onClick={() => setMode(m.id)}
+                >
                   {m.label}
                 </button>
-              )}
+              ))}
             </div>
           </div>
           <div style={{ marginTop: 12 }}>
             <CurtainViewer
               beforeUrl={before?.url ?? null}
               afterUrl={after?.url ?? null}
-              beforeLabel={before?.label ?? ''}
-              afterLabel={after?.label ?? ''}
+              beforeLabel={before ? `${before.label} · ${before.sub}` : ''}
+              afterLabel={after ? `${after.label} · ${after.sub}` : ''}
               mode={mode}
-              emptyText={items.length < 2 ? 'Add at least two images or load Sentinel-2 scenes to compare dates.' : 'A preview is not available for one of the selected items.'} />
-            
+              beforeStatus={before?.previewStatus}
+              afterStatus={after?.previewStatus}
+              beforeImage={before?.attachedImage ?? null}
+              afterImage={after?.attachedImage ?? null}
+              emptyText={
+                items.length < 2
+                  ? 'Add at least two images or load Sentinel-2 scenes to compare dates.'
+                  : 'A preview is not available for one of the selected items.'
+              }
+            />
           </div>
           <div className="image-compare-toolbar">
             <label className="range-row">
@@ -288,19 +356,19 @@ export function Temporal() {
       </div>
 
       <div className="panel panel-pad" style={{ marginTop: 14 }}>
-        <div className="toolbar">
-          <b>Temporal trend</b>
-          <span className="badge">Excess Green (RGB proxy, not NDVI)</span>
-        </div>
         <div className="chart">
-          {greenness.length >= 2 ?
-          <GreennessChart points={greenness} /> :
-
-          <div className="empty-state" style={{ padding: 32 }}>
+          {greenness.length >= 2 ? (
+            <GreennessChart
+              points={greenness}
+              metricName="Excess Green Index (RGB proxy)"
+              dateRange={dated.length >= 2 ? `${dated[0]} → ${dated[dated.length - 1]}` : undefined}
+            />
+          ) : (
+            <div className="empty-state" style={{ padding: 32 }}>
               <div className="empty-icon"><ChartLineIcon size={20} /></div>
               <p>Upload two or more browser-readable images to plot a greenness trend computed from their pixels.</p>
             </div>
-          }
+          )}
         </div>
       </div>
     </section>);

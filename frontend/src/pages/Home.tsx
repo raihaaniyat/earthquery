@@ -1,8 +1,7 @@
 import React, { useRef } from 'react';
-import { PlusIcon, CrosshairIcon, ChevronDownIcon, ArrowRightIcon, SparklesIcon, XIcon, FileImageIcon, MapPinIcon } from 'lucide-react';
+import { PlusIcon, CrosshairIcon, ChevronDownIcon, ArrowRightIcon, XIcon, FileImageIcon, MapPinIcon } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
-import { suggestions } from '../data/advancedTools';
 import { describeAoi } from '../utils/geo';
 
 export function Home() {
@@ -15,14 +14,13 @@ export function Home() {
     <section className="page page-home">
       <div className="hero-premium">
         <div className="hero-copy">
-          <div className="hero-kicker">SATQUERY AI · EARTH INTELLIGENCE</div>
           <h1>
             AI satellite analysis,
             <br />
             <span>without the complexity.</span>
           </h1>
           <p>
-            Ask a question, attach imagery, draw an area, or select a map region. SatQuery reveals only the controls needed for that task.
+            Ask a question, attach imagery, draw an area, or select a map region.
           </p>
         </div>
 
@@ -53,7 +51,7 @@ export function Home() {
               <span className="file-chip">
                     <span className="file-ph"><MapPinIcon size={14} /></span>
                     <span className="file-name">AOI · {describeAoi(aoi)}</span>
-                    <button onClick={() => setAoi(null)} aria-label="Remove AOI">
+                    <button onClick={() => setAoi(null)} aria-label="Clear AOI" title="Clear AOI">
                       <XIcon size={12} />
                     </button>
                   </span>
@@ -75,16 +73,29 @@ export function Home() {
                   e.target.value = '';
                 }} />
               
-              <button
-                className="btn"
-                onClick={() => {
-                  setMapTool('rectangle');
-                  navigate('map');
-                  toast('Draw an AOI on the map');
-                }}>
-                
-                <CrosshairIcon size={14} /> {aoi ? 'Edit AOI' : 'Select AOI'}
-              </button>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                <button
+                  className="btn"
+                  onClick={() => {
+                    setMapTool('rectangle');
+                    navigate('map');
+                    toast('Draw an AOI on the map');
+                  }}>
+                  <CrosshairIcon size={14} /> {aoi ? 'Edit AOI' : 'Select AOI'}
+                </button>
+                {aoi && (
+                  <button
+                    className="btn small danger-text"
+                    onClick={() => {
+                      setAoi(null);
+                      toast('AOI cleared');
+                    }}
+                    title="Clear selected AOI"
+                  >
+                    <XIcon size={12} /> Clear AOI
+                  </button>
+                )}
+              </div>
               <button className="btn" onClick={openDrawer}>
                 Model: <b>{modelSettings.model}</b> <ChevronDownIcon size={14} />
               </button>
@@ -94,21 +105,6 @@ export function Home() {
               </button>
             </div>
           </div>
-        </div>
-
-        <div className="suggestions">
-          {suggestions.map((s) =>
-          <button
-            key={s.label}
-            className="suggestion"
-            onClick={() => {
-              setQuery(s.query);
-              textRef.current?.focus();
-            }}>
-            
-              <SparklesIcon size={12} /> {s.label}
-            </button>
-          )}
         </div>
       </div>
     </section>);

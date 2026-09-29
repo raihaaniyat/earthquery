@@ -449,9 +449,11 @@ export function Chat() {
                           <AnalysisResult
                             result={{
                               summary: m.summary || m.content,
+                              supporting_findings: m.supporting_findings || meta.supporting_findings || [],
                               findings: m.findings || meta.findings || [],
                               sections: m.sections || meta.sections || {},
                               model: m.model || meta.model || 'InternVL3-2B',
+                              maskUrl: m.maskUrl || meta.mask_url || meta.maskUrl,
                               validation: (m.validation || meta.validation || 'passed') as any,
                               metrics: meta.metrics || {},
                               decision_reason: meta.decision_reason
@@ -459,6 +461,7 @@ export function Chat() {
                             query={turnQuery}
                             attachments={activeAttachments}
                             task={(meta.task || 'internvl') as any}
+                            onOpenMap={() => navigate('map')}
                           />
 
                           {hasMapAction && (
